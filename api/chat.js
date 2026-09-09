@@ -1,5 +1,5 @@
-import { requireApiAuth, authError } from '../lib/apiHelpers/_auth.js';
-import supabase from '../lib/apiHelpers/_supabase.js';
+import { requireApiAuth, authError } from '../src/lib/apiHelpers/_auth.js';
+import supabase from '../src/lib/apiHelpers/_supabase.js';
 
 const OPENROUTER_API_KEY =
   process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_API_KEY;
@@ -101,12 +101,12 @@ function buildChatMetadata(latestSensor, latestSettings, role) {
 }
 
 
-function buildSystemPrompt(latestSensor, settings = {}, yesterdayHistory = null) {
+function buildSystemPrompt(latestSensor, settings = {}) {
   const phase = String(settings.plant_phase || settings.crop_mode || 'vegetatif').trim().toLowerCase() === 'generatif'
     ? 'generatif'
     : 'vegetatif';
 
-  let basePrompt = `Kamu adalah Smart Farm Assistant, ahli pertanian cerdas yang membantu petani mengelola lahan.
+  return `Kamu adalah Smart Farm Assistant, ahli pertanian cerdas yang membantu petani mengelola lahan.
 
 FOKUS:
 - Fase tanaman aktif: ${phase.toUpperCase()}
@@ -124,27 +124,12 @@ FOKUS:
 Gunakan rumus pengolahan Arduino berikut tanpa mengganti konstanta kecuali pengguna meminta kalibrasi baru secara eksplisit.
 
 Jika user memberi prompt yang membahas iklim berbeda atau kondisi hipotetis lain, jawab sesuai skenario itu, bukan memaksa data sensor asli. Gunakan bahasa Indonesia yang ramah, singkat, dan akurat.`;
-
-  // Tambahkan konteks kemarin jika tersedia
-  if (yesterdayHistory && yesterdayHistory.insights) {
-    basePrompt += `
-
-RIWAYAT ANALISIS KEMARIN (untuk referensi konteks):
-- Insight Kemarin: ${yesterdayHistory.insights.substring(0, 200)}
-- Saran Kemarin: ${yesterdayHistory.recommendations ? yesterdayHistory.recommendations.substring(0, 150) : 'Tidak ada saran'}
-
-Gunakan informasi ini untuk memberikan analisis yang lebih baik tentang perubahan kondisi atau tren dari hari ke hari.`;
-  }
-
-  return basePrompt;
 }
 
 function getStatusLevel(latestSensor, settings = {}) {
-
   const low = Number(settings.soil_threshold_low ?? settings.soil_moisture_threshold ?? 40);
   const critical = Number(settings.soil_threshold_critical ?? Math.max(20, low - 10));
-  const soilMoisture = Number(latestSensor?.soil_moisture);
-  if (!Number.isFinite(soilMoisture)) return 'belum dapat dinilai karena data sensor tanah belum tersedia';
+  const soilMoisture = Number(latestSensor?.soil_moisture ?? 60);
   if (soilMoisture <= critical) return 'kritis';
   if (soilMoisture < low) return 'waspada';
   return 'aman';
@@ -187,7 +172,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST') {
-      const { message, user_id = 'anonymous', yesterdayHistory = null } = req.body || {};
+      const { message, user_id = 'anonymous' } = req.body || {};
 
       const { data: latestSensor } = await supabase
         .from('sensor_data')
@@ -211,7 +196,7 @@ export default async function handler(req, res) {
         metadata: userChatMetadata,
       });
 
-      const systemPrompt = buildSystemPrompt(latestSensor, latestSettings || {}, yesterdayHistory);
+      const systemPrompt = buildSystemPrompt(latestSensor, latestSettings || {});
 
       let aiResponse = '';
 

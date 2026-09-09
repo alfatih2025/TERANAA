@@ -8,6 +8,12 @@ export interface DailyHistory {
   insights: string;
   recommendations: string;
   messageCount: number;
+  messages: Array<{
+    id?: number;
+    role: 'user' | 'assistant';
+    content: string;
+    created_at: string;
+  }>;
 }
 
 export function useDailyHistory() {

@@ -1,11 +1,11 @@
-import { requireApiAuth } from '../lib/apiHelpers/_auth.js';
-import { getAiRouterStatus, sendAiRouterMessage, isArduinoFormulaRequest, buildFormulaReference } from '../lib/apiHelpers/_airouter.js';
-import supabase from '../lib/apiHelpers/_supabase.js';
+import { requireApiAuth } from '../src/lib/apiHelpers/_auth.js';
+import { getAiRouterStatus, sendAiRouterMessage, isArduinoFormulaRequest, buildFormulaReference } from '../src/lib/apiHelpers/_airouter.js';
+import supabase from '../src/lib/apiHelpers/_supabase.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (!requireApiAuth(req, res)) return;
@@ -20,7 +20,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { message, images = [], history = [], sensorContext = null, aiSettings = null } = req.body || {};
+    const { message, history = [], sensorContext = null, aiSettings = null } = req.body || {};
     if (!message || typeof message !== 'string') {
       return res.status(400).json({ error: 'Message is required' });
     }
@@ -41,7 +41,6 @@ export default async function handler(req, res) {
 
     const result = await sendAiRouterMessage({
       message,
-      images,
       history,
       sensorContext,
       aiSettings,
@@ -53,7 +52,7 @@ export default async function handler(req, res) {
       user_id,
       role: 'user',
       content: message,
-      metadata: { role: 'user', sensor_snapshot: sensorContext, settings_snapshot: aiSettings }
+      metadata: { role: 'user', sensor_snapshot: sensorContext, settings_snapshot: aiSettings },
     });
     if (userMessageError) throw new Error(`Gagal menyimpan pesan pengguna ke Supabase: ${userMessageError.message}`);
 
@@ -61,7 +60,7 @@ export default async function handler(req, res) {
       user_id: 'assistant_001',
       role: 'assistant',
       content: result.content || '',
-      metadata: { role: 'assistant', analysis: result.analysis }
+      metadata: { role: 'assistant', analysis: result.analysis },
     });
     if (assistantMessageError) throw new Error(`Gagal menyimpan respons AI ke Supabase: ${assistantMessageError.message}`);
 

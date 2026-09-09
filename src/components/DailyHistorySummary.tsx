@@ -1,5 +1,6 @@
-import { Calendar, TrendingUp, Lightbulb, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Calendar, TrendingUp, Lightbulb, CheckCircle2, AlertCircle, ChevronDown, ChevronUp, MessageCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useState } from 'react';
 import type { DailyHistory } from '../hooks/useDailyHistory';
 
 interface DailyHistorySummaryProps {
@@ -8,6 +9,8 @@ interface DailyHistorySummaryProps {
 }
 
 export function DailyHistorySummary({ history, isLoading = false }: DailyHistorySummaryProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
   if (isLoading) {
     return (
       <div className="space-y-3">
@@ -32,14 +35,38 @@ export function DailyHistorySummary({ history, isLoading = false }: DailyHistory
       transition={{ duration: 0.3 }}
       className="space-y-4"
     >
-      {/* Header */}
-      <div className="flex items-center gap-3 border-b border-amber-200 pb-3 dark:border-amber-500/30">
+      <button
+        type="button"
+        onClick={() => setIsExpanded((expanded) => !expanded)}
+        className="flex w-full items-center gap-3 border-b border-amber-200 pb-3 text-left dark:border-amber-500/30"
+        aria-expanded={isExpanded}
+      >
         <Calendar className="h-5 w-5 text-amber-600 dark:text-amber-400" />
-        <div>
+        <div className="flex-1">
           <h4 className="font-semibold text-slate-900 dark:text-slate-100">Riwayat Kemarin</h4>
           <p className="text-xs text-slate-600 dark:text-slate-400">{history.date}</p>
         </div>
-      </div>
+        <span className="flex items-center gap-1 text-xs text-amber-700 dark:text-amber-300">
+          <MessageCircle className="h-4 w-4" />
+          {history.messageCount} pesan
+          {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+        </span>
+      </button>
+
+      {isExpanded && history.messages.length > 0 && (
+        <div className="space-y-2 rounded-lg border border-amber-200 bg-white/70 p-3 dark:border-amber-500/30 dark:bg-slate-900/40">
+          <h5 className="text-sm font-semibold text-slate-700 dark:text-slate-300">Pesan pada {history.date}</h5>
+          {history.messages.map((message, index) => (
+            <div key={message.id || `${message.created_at}-${index}`} className="rounded-md border border-slate-200 p-2 dark:border-slate-700">
+              <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                <span className="font-medium">{message.role === 'user' ? 'Anda' : 'NexaBot'}</span>
+                <time dateTime={message.created_at}>{new Date(message.created_at).toLocaleString('id-ID')}</time>
+              </div>
+              <p className="whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-300">{message.content}</p>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Metrics Summary */}
       {history.metrics && (

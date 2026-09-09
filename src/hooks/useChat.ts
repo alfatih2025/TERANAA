@@ -54,6 +54,20 @@ function normalizeSensorContext(sensorContext?: Partial<SensorSnapshotContext> |
   return sensorContext;
 }
 
+function getJakartaDateKey(date: string | Date) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(date));
+}
+
+function filterCurrentDayMessages(chatMessages: ChatMessage[]) {
+  const todayKey = getJakartaDateKey(new Date());
+  return chatMessages.filter((message) => getJakartaDateKey(message.created_at) === todayKey);
+}
+
 export function useChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
@@ -124,7 +138,7 @@ export function useChat() {
     isInitializedRef.current = true;
 
     // Step 1: Load dari localStorage terlebih dahulu
-    const localMessages = readLocalMessages();
+    const localMessages = filterCurrentDayMessages(readLocalMessages());
     if (localMessages.length > 0) {
       persistMessages(localMessages);
     }
@@ -161,10 +175,10 @@ export function useChat() {
       const apiMessages = await fetchApiMessages();
       // Prioritas: API messages jika ada, fallback ke localStorage
       if (apiMessages && apiMessages.length > 0) {
-        persistMessages(apiMessages);
+        persistMessages(filterCurrentDayMessages(apiMessages));
       } else {
         // Jika API kosong, gunakan localStorage
-        const localMessages = readLocalMessages();
+        const localMessages = filterCurrentDayMessages(readLocalMessages());
         if (localMessages.length > 0) {
           persistMessages(localMessages);
         }
@@ -172,7 +186,7 @@ export function useChat() {
       setError(null);
     } catch (err) {
       // Jika API error, fallback ke localStorage
-      const localMessages = readLocalMessages();
+      const localMessages = filterCurrentDayMessages(readLocalMessages());
       persistMessages(localMessages);
       const errorMsg = err instanceof Error ? err.message : 'Gagal mengambil riwayat chat';
       // Jangan set error jika localStorage ada

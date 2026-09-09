@@ -9,13 +9,31 @@ function getWIBDate(baseDate = new Date()) {
   return wib;
 }
 
+function getWIBDateKey(baseDate = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(baseDate);
+}
+
+function getDateRange(dateKey) {
+  const start = new Date(`${dateKey}T00:00:00+07:00`);
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + 1);
+  return { start: start.toISOString(), end: end.toISOString() };
+}
+
 /**
  * Ambil riwayat harian untuk tanggal tertentu
  */
 export async function getDailyHistory(date = null) {
   try {
     const targetDate = date ? new Date(date) : getWIBDate();
-    const dateStr = targetDate.toISOString().split('T')[0]; // YYYY-MM-DD
+    const dateStr = typeof date === 'string' && /^\d{4}-\d{2}-\d{2}/.test(date)
+      ? date.slice(0, 10)
+      : getWIBDateKey(targetDate);
 
     const { data, error } = await supabase
       .from('chat_daily_history')
@@ -37,8 +55,20 @@ export async function getDailyHistory(date = null) {
 export async function getYesterdayHistory() {
   try {
     const yesterday = getWIBDate();
-    yesterday.setDate(yesterday.getDate() - 1);
-    return getDailyHistory(yesterday);
+    yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+    const dateKey = getWIBDateKey(yesterday);
+    const [history, messages] = await Promise.all([
+      getDailyHistory(`${dateKey}T00:00:00+07:00`),
+      getMessagesForDate(dateKey),
+    ]);
+
+    if (!history && messages.length === 0) return null;
+    return {
+      ...(history || {}),
+      history_date: history?.history_date || dateKey,
+      message_count: messages.length,
+      daily_messages: messages,
+    };
   } catch (error) {
     console.error('Error fetching yesterday history:', error);
     return null;
@@ -50,9 +80,10 @@ export async function getYesterdayHistory() {
  */
 export async function getMessagesForDate(date) {
   try {
-    const dateStr = new Date(date).toISOString().split('T')[0];
-    const startOfDay = `${dateStr}T00:00:00Z`;
-    const endOfDay = `${dateStr}T23:59:59Z`;
+    const dateStr = typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)
+      ? date
+      : getWIBDateKey(new Date(date));
+    const { start: startOfDay, end: endOfDay } = getDateRange(dateStr);
 
     const { data, error } = await supabase
       .from('chat_messages')
@@ -100,9 +131,10 @@ function generateMetricsFromMessages(messages) {
  */
 export async function generateSensorMetricsForDate(date) {
   try {
-    const dateStr = new Date(date).toISOString().split('T')[0];
-    const startOfDay = `${dateStr}T00:00:00Z`;
-    const endOfDay = `${dateStr}T23:59:59Z`;
+    const dateStr = typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)
+      ? date
+      : getWIBDateKey(new Date(date));
+    const { start: startOfDay, end: endOfDay } = getDateRange(dateStr);
 
     const { data, error } = await supabase
       .from('sensor_data')
@@ -167,7 +199,9 @@ function generateSummaryText(metrics, sensorMetrics, messages) {
 export async function saveDailyHistory(date = null, overrideData = null) {
   try {
     const targetDate = date ? new Date(date) : getWIBDate();
-    const dateStr = targetDate.toISOString().split('T')[0];
+    const dateStr = typeof date === 'string' && /^\d{4}-\d{2}-\d{2}/.test(date)
+      ? date.slice(0, 10)
+      : getWIBDateKey(targetDate);
 
     // Ambil messages untuk hari itu
     const messages = await getMessagesForDate(targetDate);
@@ -305,6 +339,12 @@ export function formatHistoryForDisplay(history) {
     metrics: history.key_metrics,
     insights: history.ai_insights,
     recommendations: history.recommendations,
-    messageCount: history.message_count,
+    messageCount: history.message_count || history.daily_messages?.length || 0,
+    messages: (history.daily_messages || []).map((message) => ({
+      id: message.id,
+      role: message.role,
+      content: message.content,
+      created_at: message.created_at,
+    })),
   };
 }

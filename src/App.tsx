@@ -24,6 +24,7 @@ import { getSensorHistorySnapshot, publishRainChance } from './services/mqtt';
 import { recordActivity } from './lib/activityLog';
 import { LoginPage } from './pages/LoginPage';
 import { useAuth } from './hooks/useAuth';
+import { Analytics } from '@vercel/analytics/react';
 
 import './index.css';
 
@@ -324,6 +325,7 @@ function App() {
           </main>
         </div>
       </div>
+      <Analytics />
     </div>
   );
 }

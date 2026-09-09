@@ -65,7 +65,7 @@ function getHeaders(origin) {
     Authorization: `Bearer ${getOpenRouterKey()}`,
     'Content-Type': 'application/json',
     'HTTP-Referer': origin || 'http://localhost:5173',
-    'X-Title': 'NexaGrow NexaBot',
+    'X-Title': 'TERANA TERANA AI',
   };
 }
 
@@ -243,7 +243,7 @@ function buildSystemPrompt(sensor) {
     : '- Data cuaca belum tersedia.';
 
   return [
-    'Kamu adalah Smart Farm Assistant untuk aplikasi NexaGrow.',
+    'Kamu adalah Smart Farm Assistant untuk aplikasi TERANA.',
     'Jawab dalam bahasa Indonesia yang ramah, singkat, dan langsung bisa dipakai.',
     'Gunakan format yang rapi dan mudah dibaca: judul singkat, bullet point, dan tabel sederhana bila perlu.',
     'Utamakan struktur seperti: Ringkasan, Analisis, Rekomendasi, dan jika relevan tampilkan Rumus.',

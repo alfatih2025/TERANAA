@@ -56,9 +56,9 @@ export function Sidebar({ currentPage, onPageChange }: SidebarProps) {
       <div className="flex items-center justify-between gap-3 p-6">
         <div className="flex items-center gap-3 min-w-0">
           <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-green-600 dark:bg-blue-600">
-            <img src={logo} alt="NexaGrow" className="h-full w-full object-cover" />
+            <img src={logo} alt="TERANA" className="h-full w-full object-cover" />
           </div>
-          <h1 className="text-xl font-bold text-slate-900 dark:text-white">NexaGrow</h1>
+          <h1 className="text-xl font-bold text-slate-900 dark:text-white">TERANA</h1>
         </div>
         <button
           onClick={() => setMobileOpen(false)}
@@ -129,7 +129,7 @@ export function Sidebar({ currentPage, onPageChange }: SidebarProps) {
         </div>
         
         <p className="text-[10px] font-bold tracking-wider text-slate-600 dark:text-slate-500 uppercase">
-          NexaGrow Web v2.0
+          TERANA Web v2.0
         </p>
       </div>
     </div>

@@ -59,7 +59,7 @@ export function DailyHistorySummary({ history, isLoading = false }: DailyHistory
           {history.messages.map((message, index) => (
             <div key={message.id || `${message.created_at}-${index}`} className="rounded-md border border-slate-200 p-2 dark:border-slate-700">
               <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                <span className="font-medium">{message.role === 'user' ? 'Anda' : 'NexaBot'}</span>
+                <span className="font-medium">{message.role === 'user' ? 'Anda' : 'TERANA AI'}</span>
                 <time dateTime={message.created_at}>{new Date(message.created_at).toLocaleString('id-ID')}</time>
               </div>
               <p className="whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-300">{message.content}</p>

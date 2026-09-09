@@ -39,7 +39,7 @@ export function LoginPage() {
             <div className="mx-auto bg-green-100 dark:bg-green-900/30 w-16 h-16 flex items-center justify-center rounded-2xl mb-4 shadow-inner">
               <Leaf className="w-8 h-8 text-green-600 dark:text-green-400" />
             </div>
-            <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">NexaGrow Admin</h1>
+            <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">TERANA Admin</h1>
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">Login dengan Google untuk mengakses kontrol panel pintar.</p>
           </div>
 

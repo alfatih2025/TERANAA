@@ -349,7 +349,7 @@ export function ChatInterface({ sensorData = null, settings = null, weatherData 
               <Bot className={`${isCompact ? 'h-4 w-4' : 'h-5 w-5'} text-white`} />
             </div>
             <div>
-              <h3 className={`font-semibold text-gray-800 ${isCompact ? 'text-sm' : ''}`}>NexaBot</h3>
+              <h3 className={`font-semibold text-gray-800 ${isCompact ? 'text-sm' : ''}`}>TERANA AI</h3>
               <p className={`flex items-center gap-1 text-xs ${statusTone.text}`}>
                 <span className={`h-2 w-2 rounded-full ${statusTone.dot} ${connectionStatus.state === 'connected' ? 'animate-pulse' : ''}`} />
                 {connectionStatus.label}
@@ -418,7 +418,7 @@ export function ChatInterface({ sensorData = null, settings = null, weatherData 
             <div className={`mx-auto mb-4 flex items-center justify-center rounded-full bg-green-50 ${isCompact ? 'h-14 w-14' : 'h-20 w-20'}`}>
               <Leaf className={`text-green-600 ${isCompact ? 'h-7 w-7' : 'h-10 w-10'}`} />
             </div>
-            <h4 className={`mb-2 font-semibold text-gray-700 ${isCompact ? 'text-sm' : 'text-lg'}`}>Selamat datang di NexaBot!</h4>
+            <h4 className={`mb-2 font-semibold text-gray-700 ${isCompact ? 'text-sm' : 'text-lg'}`}>Selamat datang di TERANA AI!</h4>
             <p className={`mx-auto ${isCompact ? 'mb-4 text-xs' : 'mb-6 max-w-md text-gray-600'}`}>
               Saya siap membantu memantau tanaman, membaca data cuaca aktif, dan memberi saran berdasarkan fase vegetatif atau generatif.
             </p>

@@ -32,9 +32,9 @@ export function AboutPage() {
             <Info size={22} />
           </div>
           <div>
-            <h1 className="text-2xl font-bold">About / Tentang Web IoT NexaGrow</h1>
+            <h1 className="text-2xl font-bold">About / Tentang Web IoT TERANA</h1>
             <p className="text-green-100 mt-2 max-w-3xl">
-              NexaGrow adalah platform monitoring tanaman berbasis IoT yang membantu petani menjaga kondisi pertumbuhan lebih konsisten melalui
+              TERANA adalah platform monitoring tanaman berbasis IoT yang membantu petani menjaga kondisi pertumbuhan lebih konsisten melalui
               data sensor, kontrol perangkat, dan dukungan analitik.
             </p>
           </div>
@@ -43,11 +43,11 @@ export function AboutPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="rounded-2xl bg-white/70 backdrop-blur border border-green-100 p-6 shadow-sm">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Arti “NexaGrow”</h2>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Arti “TERANA”</h2>
           <p className="text-sm text-gray-700 leading-relaxed mt-3 dark:text-gray-300">
             <span className="font-semibold">Nexa</span> menggambarkan konektivitas dan kecerdasan berbasis data,
             sedangkan <span className="font-semibold">Grow</span> merepresentasikan tujuan utama: membantu tanaman tumbuh optimal.
-            Gabungan keduanya menjadikan NexaGrow sebagai “otak” digital untuk pertumbuhan tanaman yang terukur dan lebih efisien.
+            TERANA menjadi “otak” digital untuk pertumbuhan tanaman yang terukur dan lebih efisien.
           </p>
 
           <div className="mt-5 flex flex-wrap gap-2">
@@ -66,7 +66,7 @@ export function AboutPage() {
         <div className="rounded-2xl bg-white/70 backdrop-blur border border-green-100 p-6 shadow-sm">
           <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Fitur Utama</h2>
           <p className="text-sm text-gray-700 leading-relaxed mt-3 dark:text-gray-300">
-            Web NexaGrow dirancang untuk memberi visibilitas real-time, tindakan cepat, dan panduan berbasis AI agar keputusan perawatan
+            Web TERANA dirancang untuk memberi visibilitas real-time, tindakan cepat, dan panduan berbasis AI agar keputusan perawatan
             tanaman lebih tepat.
           </p>
         </div>
@@ -125,7 +125,7 @@ export function AboutPage() {
           icon={BookOpen}
         />
         <Feature
-          title="AI Chat (NexaBot)"
+          title="AI Chat (TERANA AI)"
           description="Gunakan AI untuk mendapatkan saran perawatan dan penjelasan berdasarkan data sensor dan konteks tanaman."
           icon={Radar}
         />

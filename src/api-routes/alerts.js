@@ -18,7 +18,7 @@ async function sendEmailNotification({ recipientEmail, type, message, severity }
     body: JSON.stringify({
       from: fromEmail,
       to: recipientEmail,
-      subject: `[NexaGrow] ${severity === 'danger' ? 'Kondisi Kritis' : 'Notifikasi'} - ${type}`,
+      subject: `[TERANA] ${severity === 'danger' ? 'Kondisi Kritis' : 'Notifikasi'} - ${type}`,
       text: message,
     }),
   });

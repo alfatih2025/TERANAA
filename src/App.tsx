@@ -289,7 +289,7 @@ function App() {
             className="mb-6 h-20 w-20 rounded-full border-4 border-green-200 border-t-green-500"
           />
           <div>
-            <h2 className="mb-2 text-2xl font-bold text-green-800">NexaGrow</h2>
+            <h2 className="mb-2 text-2xl font-bold text-green-800">TERANA</h2>
             <p className="text-green-600 dark:text-green-400">Memuat data sensor...</p>
           </div>
         </motion.div>

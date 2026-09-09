@@ -4,6 +4,7 @@
 import sensorHandler from '../src/api-routes/sensor.js';
 import alertsHandler from '../src/api-routes/alerts.js';
 import chatHandler from '../src/api-routes/chat.js';
+import chatDailyHistoryHandler from '../src/api-routes/chat-daily-history.js';
 import controlHandler from '../src/api-routes/control.js';
 import deviceStatusHandler from '../src/api-routes/device-status.js';
 import exportHandler from '../src/api-routes/export.js';
@@ -20,6 +21,7 @@ const routes = {
   'sensor-data': sensorHandler,
   'alerts': alertsHandler,
   'chat': chatHandler,
+  'chat-daily-history': chatDailyHistoryHandler,
   'control': controlHandler,
   'device-status': deviceStatusHandler,
   'export': exportHandler,

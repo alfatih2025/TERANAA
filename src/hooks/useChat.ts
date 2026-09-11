@@ -1,0 +1,281 @@
+import { buildApiHeaders } from '../lib/apiAuth';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import type { SensorSnapshotContext } from '../services/openrouter';
+import type { DailyHistory } from './useDailyHistory';
+
+export interface ChatMessage {
+  id: number;
+  user_id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  images?: string[];
+  created_at: string;
+}
+
+const STORAGE_KEY = 'nexaGrow-chat-messages';
+
+function readLocalMessages(): ChatMessage[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function createMessage(role: 'user' | 'assistant', content: string, images?: string[]): ChatMessage {
+  return {
+    id: Date.now() + Math.floor(Math.random() * 1000),
+    user_id: role === 'user' ? 'user_001' : 'assistant_001',
+    role,
+    content,
+    images: images && images.length > 0 ? images : undefined,
+    created_at: new Date().toISOString(),
+  };
+}
+
+async function fetchApiMessages(): Promise<ChatMessage[]> {
+  const response = await fetch('/api/chat', { headers: buildApiHeaders() });
+  if (!response.ok) {
+    throw new Error(`Chat API tidak merespons (${response.status})`);
+  }
+  const data = await response.json();
+  if (!Array.isArray(data)) {
+    throw new Error('Format riwayat chat dari API tidak valid.');
+  }
+  return data;
+}
+
+function normalizeSensorContext(sensorContext?: Partial<SensorSnapshotContext> | null) {
+  if (!sensorContext || typeof sensorContext !== 'object') return null;
+  return sensorContext;
+}
+
+function getJakartaDateKey(date: string | Date) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(date));
+}
+
+function filterCurrentDayMessages(chatMessages: ChatMessage[]) {
+  const todayKey = getJakartaDateKey(new Date());
+  return chatMessages.filter((message) => getJakartaDateKey(message.created_at) === todayKey);
+}
+
+export function useChat() {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [analysisData, setAnalysisData] = useState<any | null>(null);
+  const [yesterdayHistory, setYesterdayHistory] = useState<DailyHistory | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState({
+    state: 'checking',
+    label: 'Memeriksa AI Router',
+    detail: 'Menghubungkan chatbot ke sistem...',
+  });
+
+  // Track initialization untuk prevent multiple fetches
+  const isInitializedRef = useRef(false);
+  const isFetchingRef = useRef(false);
+
+  const persistMessages = useCallback((nextMessages: ChatMessage[]) => {
+    setMessages(nextMessages);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextMessages));
+    }
+  }, []);
+
+  const refreshConnectionStatus = useCallback(async () => {
+    setConnectionStatus({
+      state: 'checking',
+      label: 'Memeriksa AI Router',
+      detail: 'Menghubungkan chatbot ke sistem...',
+    });
+    try {
+      const res = await fetch('/api/airouter', { headers: buildApiHeaders() });
+      if (res.ok) {
+        setConnectionStatus({ state: 'connected', label: 'AI Router Aktif', detail: 'Sistem siap.' });
+      } else {
+        setConnectionStatus({ state: 'error', label: 'AI Router Error', detail: 'Periksa API Keys' });
+      }
+    } catch {
+      setConnectionStatus({ state: 'error', label: 'AI Router Offline', detail: 'Gagal menghubungi server' });
+    }
+  }, []);
+
+  /**
+   * Load yesterday's history untuk konteks AI
+   */
+  const loadYesterdayHistory = useCallback(async () => {
+    try {
+      const response = await fetch('/api/chat-daily-history?target=yesterday', {
+        headers: buildApiHeaders(),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setYesterdayHistory(result.data as DailyHistory);
+      }
+    } catch (err) {
+      // Silently fail - history tidak wajib
+      console.warn('Failed to load yesterday history:', err);
+    }
+  }, []);
+
+  /**
+   * Initialize hook - hanya sekali saat mount
+   * Gunakan useRef untuk track initialization state
+   */
+  useEffect(() => {
+    // Jangan jalankan initialization dua kali
+    if (isInitializedRef.current) return;
+    isInitializedRef.current = true;
+
+    // Step 1: Load dari localStorage terlebih dahulu
+    const localMessages = filterCurrentDayMessages(readLocalMessages());
+    if (localMessages.length > 0) {
+      persistMessages(localMessages);
+    }
+
+    // Step 2: Coba sync dengan API (tapi jangan overwrite local jika API kosong)
+    fetchMessages();
+
+    // Step 3: Check connection status
+    refreshConnectionStatus();
+
+    // Step 4: Load yesterday history untuk AI context
+    loadYesterdayHistory();
+  }, []); // Empty dependency array - hanya jalankan sekali saat mount
+
+  const clearMessages = useCallback(async () => {
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'DELETE',
+        headers: buildApiHeaders({ 'Content-Type': 'application/json' }),
+      });
+
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || 'Gagal menghapus riwayat chat hari ini');
+      }
+
+      persistMessages([]);
+      setAnalysisData(null);
+      setError(null);
+    } catch {
+      setError('Gagal menghapus riwayat chat hari ini. Coba lagi.');
+    }
+  }, [persistMessages]);
+
+  const fetchMessages = useCallback(async () => {
+    // Prevent multiple simultaneous fetches
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+
+    try {
+      const apiMessages = await fetchApiMessages();
+      // Prioritas: API messages jika ada, fallback ke localStorage
+      if (apiMessages && apiMessages.length > 0) {
+        persistMessages(filterCurrentDayMessages(apiMessages));
+      } else {
+        // Jika API kosong, gunakan localStorage
+        const localMessages = filterCurrentDayMessages(readLocalMessages());
+        if (localMessages.length > 0) {
+          persistMessages(localMessages);
+        }
+      }
+      setError(null);
+    } catch (err) {
+      // Jika API error, fallback ke localStorage
+      const localMessages = filterCurrentDayMessages(readLocalMessages());
+      persistMessages(localMessages);
+      const errorMsg = err instanceof Error ? err.message : 'Gagal mengambil riwayat chat';
+      // Jangan set error jika localStorage ada
+      if (localMessages.length === 0) {
+        setError(errorMsg);
+      }
+    } finally {
+      isFetchingRef.current = false;
+    }
+  }, [persistMessages]);
+
+  const sendMessage = useCallback(
+    async (message: string, sensorContext?: Partial<SensorSnapshotContext> | null, settings?: any, images?: string[]) => {
+      const trimmedMessage = message.trim();
+      if (!trimmedMessage && (!images || images.length === 0)) return;
+
+      setLoading(true);
+      setError(null);
+
+      const displayMessage = trimmedMessage || (images && images.length > 0 ? '[Mengunggah foto tanaman untuk analisis visual...]' : '');
+      const userMessage = createMessage('user', displayMessage, images);
+      const optimisticMessages = [...messages, userMessage];
+      persistMessages(optimisticMessages);
+
+      try {
+        const response = await fetch('/api/airouter', {
+          method: 'POST',
+          headers: buildApiHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({
+            message: displayMessage,
+            images: images || [],
+            history: optimisticMessages.map(m => ({ role: m.role, content: m.content })),
+            sensorContext: normalizeSensorContext(sensorContext),
+            aiSettings: settings,
+            yesterdayHistory: yesterdayHistory ? {
+              summary: yesterdayHistory.summary,
+              insights: yesterdayHistory.insights,
+              recommendations: yesterdayHistory.recommendations,
+            } : null,
+          })
+        });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Gagal menghubungi AI Router');
+
+        const assistantMessage = createMessage('assistant', data.content || 'Maaf, jawaban kosong.');
+        persistMessages([...optimisticMessages, assistantMessage]);
+        
+        if (data.analysis) {
+          setAnalysisData(data.analysis);
+        }
+
+        setConnectionStatus({
+          state: 'connected',
+          label: 'AI Router Aktif',
+          detail: `Respons diterima via ${data.provider} (${data.model})`,
+        });
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : 'Unknown chat error';
+        setError(detail);
+        setConnectionStatus({
+          state: 'error',
+          label: 'AI Router Error',
+          detail,
+        });
+      } finally {
+        setLoading(false);
+      }
+    },
+    [messages, persistMessages, yesterdayHistory],
+  );
+
+  return {
+    messages,
+    loading,
+    error,
+    analysisData,
+    yesterdayHistory,
+    sendMessage,
+    refetch: fetchMessages,
+    clearMessages,
+    connectionStatus,
+    refreshConnectionStatus,
+  };
+}

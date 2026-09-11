@@ -1,0 +1,314 @@
+import { useState, useEffect, useCallback } from 'react';
+import { buildApiHeaders } from '../lib/apiAuth';
+import { getPhaseDefaults, normalizePlantPhase, type PlantPhase } from '../lib/plantPhase';
+import { DEFAULT_WEATHER_LOCATION_CODE, normalizeWeatherLocationCode } from '../lib/weatherLocations';
+
+export interface Settings {
+  id: number;
+  plant_phase: PlantPhase;
+  location: string;
+  temp_threshold_high: number;
+  temp_threshold_low: number;
+  soil_threshold_low: number;
+  soil_threshold_high: number;
+  soil_threshold_critical: number;
+  humidity_threshold_low: number;
+  humidity_threshold_high: number;
+  auto_report: boolean;
+  report_time: string;
+  watering_time: string;
+  watering_duration: number;
+  watering_enabled: boolean;
+  user_name: string;
+  user_email: string;
+  crop_mode?: PlantPhase;
+  soil_moisture_threshold?: number;
+  // AI Router settings
+  ai_mode: 'default' | 'expert';
+  ai_primary_provider: 'gemini' | 'openrouter' | 'groq';
+  ai_primary_model: string;
+  ai_fallback_1_provider: 'gemini' | 'openrouter' | 'groq' | 'none';
+  ai_fallback_1_model: string;
+  ai_fallback_2_provider: 'gemini' | 'openrouter' | 'groq' | 'none';
+  ai_fallback_2_model: string;
+  ai_strategy: 'priority' | 'fastest' | 'cheapest' | 'best_quality' | 'automatic';
+  ai_temperature: number;
+  ai_max_tokens: number;
+}
+
+const DEFAULT_PHASE = 'vegetatif' as const;
+const phaseDefaults = getPhaseDefaults(DEFAULT_PHASE);
+const STORAGE_KEY = 'nexagrow-settings-cache-v3';
+const SETTINGS_EVENT = 'nexagrow:settings-updated';
+const CURRENT_GEMINI_MODEL = 'gemini-3.5-flash-lite';
+const CURRENT_GROQ_MODEL = 'openai/gpt-oss-120b';
+
+export const DEFAULT_SETTINGS: Settings = {
+  id: 1,
+  plant_phase: DEFAULT_PHASE,
+  location: DEFAULT_WEATHER_LOCATION_CODE,
+  temp_threshold_high: phaseDefaults.temp_threshold_high,
+  temp_threshold_low: phaseDefaults.temp_threshold_low,
+  soil_threshold_low: phaseDefaults.soil_threshold_low,
+  soil_threshold_high: phaseDefaults.soil_threshold_high,
+  soil_threshold_critical: phaseDefaults.soil_threshold_critical,
+  humidity_threshold_low: phaseDefaults.humidityRange[0],
+  humidity_threshold_high: phaseDefaults.humidityRange[1],
+  auto_report: true,
+  report_time: '08:00',
+  watering_time: '06:00',
+  watering_duration: 10,
+  watering_enabled: true,
+  user_name: 'Petani Cerdas',
+  user_email: 'petani@sprout.id',
+  crop_mode: DEFAULT_PHASE,
+  soil_moisture_threshold: phaseDefaults.soil_threshold_low,
+  // AI Router Defaults
+  ai_mode: 'default',
+  ai_primary_provider: 'gemini',
+  ai_primary_model: CURRENT_GEMINI_MODEL,
+  ai_fallback_1_provider: 'openrouter',
+  ai_fallback_1_model: 'qwen/qwen-2.5-72b-instruct',
+  ai_fallback_2_provider: 'groq',
+  ai_fallback_2_model: CURRENT_GROQ_MODEL,
+  ai_strategy: 'priority',
+  ai_temperature: 0.4,
+  ai_max_tokens: 600,
+};
+
+function toFiniteNumber(value: unknown, fallback: number) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function toBoolean(value: unknown, fallback = false) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['true', '1', 'on', 'yes', 'y'].includes(normalized)) return true;
+    if (['false', '0', 'off', 'no', 'n'].includes(normalized)) return false;
+  }
+  return fallback;
+}
+
+function clampRange(lowValue: number, highValue: number, min: number, max: number, fallbackLow: number, fallbackHigh: number) {
+  const highFloor = Math.min(max, Math.max(min + 1, highValue));
+  const lowCeil = Math.min(highFloor - 1, Math.max(min, lowValue));
+  const low = Number.isFinite(lowCeil) ? lowCeil : fallbackLow;
+  const high = Number.isFinite(highFloor) ? highFloor : fallbackHigh;
+  if (low >= high) {
+    const safeLow = Math.min(fallbackLow, fallbackHigh - 1);
+    const safeHigh = Math.max(fallbackHigh, safeLow + 1);
+    return [safeLow, safeHigh] as const;
+  }
+  return [low, high] as const;
+}
+
+function normalizeAiProviderModel(provider: string, model: unknown, fallback: string) {
+  const normalized = String(model || fallback).trim() || fallback;
+  if (provider === 'groq' && ['llama-3.1-8b-instant', 'llama-3.3-70b-versatile', 'mixtral-8x7b-32768'].includes(normalized)) {
+    return CURRENT_GROQ_MODEL;
+  }
+  if (provider === 'gemini' && ['gemini-2.0-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-flash-lite-preview', 'gemini-3.1-pro', 'gemini-3.6-flash'].includes(normalized)) {
+    return CURRENT_GEMINI_MODEL;
+  }
+  return normalized;
+}
+
+function readStoredSettings(): Settings | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<Settings>;
+    return normalizeSettings(parsed);
+  } catch {
+    return null;
+  }
+}
+
+function persistSettings(settings: Settings, emitEvent = true) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    if (emitEvent) {
+      window.dispatchEvent(new CustomEvent(SETTINGS_EVENT, { detail: settings }));
+    }
+  } catch {
+    // ignore storage failures
+  }
+}
+
+function normalizeSettings(input: Partial<Settings> | null | undefined): Settings {
+  const value = { ...DEFAULT_SETTINGS };
+  for (const [key, item] of Object.entries(input || {})) {
+    if (item !== null && item !== undefined) {
+      (value as Record<string, unknown>)[key] = item;
+    }
+  }
+  const phase = normalizePlantPhase((value.plant_phase ?? value.crop_mode) as unknown);
+  const defaults = getPhaseDefaults(phase);
+
+  const rawLow = toFiniteNumber(value.soil_threshold_low ?? value.soil_moisture_threshold, defaults.soil_threshold_low);
+  const rawHigh = toFiniteNumber(value.soil_threshold_high, defaults.soil_threshold_high);
+  const rawCritical = toFiniteNumber(value.soil_threshold_critical, defaults.soil_threshold_critical);
+  const rawHumidityLow = toFiniteNumber((value as Record<string, unknown>).humidity_threshold_low ?? (value as Record<string, unknown>).air_humidity_low, defaults.humidityRange[0]);
+  const rawHumidityHigh = toFiniteNumber((value as Record<string, unknown>).humidity_threshold_high ?? (value as Record<string, unknown>).air_humidity_high, defaults.humidityRange[1]);
+
+  const [soilLow, soilHigh] = clampRange(rawLow, rawHigh, 0, 100, defaults.soil_threshold_low, defaults.soil_threshold_high);
+  const [humidityLow, humidityHigh] = clampRange(rawHumidityLow, rawHumidityHigh, 0, 100, defaults.humidityRange[0], defaults.humidityRange[1]);
+  const critical = Math.min(Math.max(0, rawCritical), soilLow);
+
+  return {
+    ...value,
+    id: 1,
+    plant_phase: phase,
+    crop_mode: phase,
+    location: normalizeWeatherLocationCode(value.location),
+    temp_threshold_high: toFiniteNumber(value.temp_threshold_high, defaults.temp_threshold_high),
+    temp_threshold_low: toFiniteNumber(value.temp_threshold_low, defaults.temp_threshold_low),
+    soil_threshold_low: soilLow,
+    soil_threshold_high: soilHigh,
+    soil_threshold_critical: critical,
+    humidity_threshold_low: humidityLow,
+    humidity_threshold_high: humidityHigh,
+    auto_report: toBoolean(value.auto_report, DEFAULT_SETTINGS.auto_report),
+    report_time: typeof value.report_time === 'string' && /^\d{2}:\d{2}$/.test(value.report_time) ? value.report_time : DEFAULT_SETTINGS.report_time,
+    watering_time: typeof value.watering_time === 'string' && /^\d{2}:\d{2}$/.test(value.watering_time) ? value.watering_time : DEFAULT_SETTINGS.watering_time,
+    watering_duration: toFiniteNumber(value.watering_duration, DEFAULT_SETTINGS.watering_duration),
+    watering_enabled: toBoolean(value.watering_enabled, DEFAULT_SETTINGS.watering_enabled),
+    user_name: String(value.user_name || DEFAULT_SETTINGS.user_name).trim() || DEFAULT_SETTINGS.user_name,
+    user_email: String(value.user_email || DEFAULT_SETTINGS.user_email).trim() || DEFAULT_SETTINGS.user_email,
+    soil_moisture_threshold: soilLow,
+    // AI Router fields
+    ai_mode: ['default', 'expert'].includes(value.ai_mode as string) ? (value.ai_mode as 'default' | 'expert') : DEFAULT_SETTINGS.ai_mode,
+    ai_primary_provider: ['gemini', 'openrouter', 'groq'].includes(value.ai_primary_provider as string) ? (value.ai_primary_provider as 'gemini' | 'openrouter' | 'groq') : DEFAULT_SETTINGS.ai_primary_provider,
+    ai_primary_model: normalizeAiProviderModel(String(value.ai_primary_provider || DEFAULT_SETTINGS.ai_primary_provider), value.ai_primary_model, DEFAULT_SETTINGS.ai_primary_model),
+    ai_fallback_1_provider: ['gemini', 'openrouter', 'groq', 'none'].includes(value.ai_fallback_1_provider as string) ? (value.ai_fallback_1_provider as 'gemini' | 'openrouter' | 'groq' | 'none') : DEFAULT_SETTINGS.ai_fallback_1_provider,
+    ai_fallback_1_model: normalizeAiProviderModel(String(value.ai_fallback_1_provider || DEFAULT_SETTINGS.ai_fallback_1_provider), value.ai_fallback_1_model, DEFAULT_SETTINGS.ai_fallback_1_model),
+    ai_fallback_2_provider: ['gemini', 'openrouter', 'groq', 'none'].includes(value.ai_fallback_2_provider as string) ? (value.ai_fallback_2_provider as 'gemini' | 'openrouter' | 'groq' | 'none') : DEFAULT_SETTINGS.ai_fallback_2_provider,
+    ai_fallback_2_model: normalizeAiProviderModel(String(value.ai_fallback_2_provider || DEFAULT_SETTINGS.ai_fallback_2_provider), value.ai_fallback_2_model, DEFAULT_SETTINGS.ai_fallback_2_model),
+    ai_strategy: ['priority', 'fastest', 'cheapest', 'best_quality', 'automatic'].includes(value.ai_strategy as string) ? (value.ai_strategy as 'priority' | 'fastest' | 'cheapest' | 'best_quality' | 'automatic') : DEFAULT_SETTINGS.ai_strategy,
+    ai_temperature: Math.min(2, Math.max(0, toFiniteNumber(value.ai_temperature, DEFAULT_SETTINGS.ai_temperature))),
+    ai_max_tokens: Math.min(8000, Math.max(100, toFiniteNumber(value.ai_max_tokens, DEFAULT_SETTINGS.ai_max_tokens))),
+  };
+}
+
+export function useSettings() {
+  const [settings, setSettings] = useState<Settings | null>(() => readStoredSettings());
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const syncLocalSettings = useCallback((next: Settings) => {
+    const normalized = normalizeSettings(next);
+    setSettings(normalized);
+    persistSettings(normalized, true);
+    return normalized;
+  }, []);
+
+  const fetchSettings = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/settings', { headers: buildApiHeaders() });
+      if (!res.ok) throw new Error('Failed to fetch settings');
+      const data = await res.json();
+      const normalized = syncLocalSettings(normalizeSettings(data));
+      setError(null);
+      return normalized;
+    } catch (err) {
+      const fallback = readStoredSettings() ?? DEFAULT_SETTINGS;
+      setSettings(fallback);
+      persistSettings(fallback, true);
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      return fallback;
+    } finally {
+      setLoading(false);
+    }
+  }, [syncLocalSettings]);
+
+  const updateSettings = useCallback(
+    async (updates: Partial<Settings>) => {
+      setLoading(true);
+      const previous = settings ? normalizeSettings(settings) : DEFAULT_SETTINGS;
+      const payload = normalizeSettings({ ...previous, ...updates });
+
+      // Optimistic update: UI/dashboard langsung mengikuti perubahan lokal.
+      // Jika API sedang bermasalah, perubahan tetap dipertahankan di browser.
+      syncLocalSettings(payload);
+
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'PUT',
+          headers: buildApiHeaders({
+            'Content-Type': 'application/json',
+          }),
+          body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+          const message = `Failed to update settings (${res.status})`;
+          setError(message);
+          return payload;
+        }
+
+        const data = await res.json();
+        const normalized = syncLocalSettings(normalizeSettings(data));
+        setError(null);
+        return normalized;
+      } catch (err) {
+        // Tetap gunakan payload lokal agar dashboard/cuaca tidak balik ke nilai lama.
+        // Ini penting karena MQTT ke ESP32 tetap harus tetap bisa dikirim meski API gagal.
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        setError(message);
+        return payload;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [settings, syncLocalSettings],
+  );
+
+  useEffect(() => {
+    void fetchSettings();
+  }, [fetchSettings]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleExternalSync = (event: Event) => {
+      const detail = (event as CustomEvent<Partial<Settings>>).detail;
+      if (!detail || typeof detail !== 'object') return;
+      setSettings((current) => {
+        const normalized = normalizeSettings({ ...(current ?? DEFAULT_SETTINGS), ...detail });
+        persistSettings(normalized, false);
+        return normalized;
+      });
+    };
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== STORAGE_KEY || !event.newValue) return;
+      try {
+        const parsed = JSON.parse(event.newValue) as Partial<Settings>;
+        setSettings(normalizeSettings(parsed));
+      } catch {
+        // ignore invalid storage updates
+      }
+    };
+
+    window.addEventListener(SETTINGS_EVENT, handleExternalSync);
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener(SETTINGS_EVENT, handleExternalSync);
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, []);
+
+  return {
+    settings,
+    loading,
+    error,
+    refetch: fetchSettings,
+    updateSettings,
+  };
+}

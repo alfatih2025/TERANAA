@@ -137,12 +137,12 @@ export function Dashboard({ sensorData, settings, weatherData }: DashboardProps)
       {/* Node Cards Pertanian (Node 1 & Node 2) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <NodeCard 
-          nodeName="Wemos Node 1 (Bedeng A)"
+          nodeName="Wemos Node 1"
           nodeId={1}
           data={node1}
         />
         <NodeCard 
-          nodeName="Wemos Node 2 (Bedeng B)"
+          nodeName="Wemos Node 2)"
           nodeId={2}
           data={node2}
         />

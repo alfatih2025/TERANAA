@@ -159,8 +159,8 @@ export function Dashboard({ sensorData, settings, weatherData }: DashboardProps)
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-700">
                 <th className="py-2 sm:py-3 px-2 sm:px-4 font-semibold text-slate-600 dark:text-slate-400">Parameter</th>
-                <th className="py-2 sm:py-3 px-2 sm:px-4 font-bold text-green-600 dark:text-green-400">Node 1 (Bedeng A)</th>
-                <th className="py-2 sm:py-3 px-2 sm:px-4 font-bold text-blue-600 dark:text-blue-400">Node 2 (Bedeng B)</th>
+                <th className="py-2 sm:py-3 px-2 sm:px-4 font-bold text-green-600 dark:text-green-400">Node 1</th>
+                <th className="py-2 sm:py-3 px-2 sm:px-4 font-bold text-blue-600 dark:text-blue-400">Node 2</th>
                 {karhutlaEnabled && (
                   <th className="py-2 sm:py-3 px-2 sm:px-4 font-bold text-amber-600 dark:text-amber-400">Node 3 (Gambut)</th>
                 )}

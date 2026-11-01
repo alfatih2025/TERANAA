@@ -26,18 +26,24 @@ const TOPIC_SCHEDULE_CMD = 'sproutai/schedule/cmd';
 const TOPIC_SCHEDULE_STATUS = 'sproutai/schedule/status';
 const TOPIC_SENSOR_JSON = 'sproutai/sensor/data';
 const TOPIC_SENSOR_NODE = 'sproutai/sensor/node/+';
+const TOPIC_PH = 'sproutai/sensor/ph';
 const TOPIC_RAIN_CHANCE = 'sproutai/weather/rain_chance';
 const TOPIC_SOIL = 'sproutai/sensor/soil';
 const TOPIC_TEMP = 'sproutai/sensor/temp';
 const TOPIC_HUMIDITY = 'sproutai/sensor/humidity';
 const TOPIC_SCORE = 'sproutai/sensor/score';
 const TOPIC_SYSTEM_FAULT = 'sproutai/system/fault';
+const TOPIC_KARHUTLA_FWI = 'sproutai/karhutla/fwi';
+const TOPIC_KARHUTLA_ALERT = 'sproutai/karhutla/alert';
 
 const SUBSCRIBE_TOPICS = [
   DEVICE_STATUS_TOPIC,
   SYSTEM_STATUS_TOPIC,
   TOPIC_SENSOR_JSON,
   TOPIC_SENSOR_NODE,
+  TOPIC_KARHUTLA_FWI,
+  TOPIC_KARHUTLA_ALERT,
+  TOPIC_PH,
   TOPIC_SOIL,
   TOPIC_TEMP,
   TOPIC_HUMIDITY,
@@ -66,11 +72,19 @@ export interface MqttSensorSnapshot {
   temperature: number | null;
   humidity: number | null;
   soil_moisture: number | null;
+  ph: number | null;
+  soil_temp?: number | null;
+  fwi?: number | null;
+  fwi_level?: number | null;
+  fwi_status?: string | null;
+  ffmc?: number | null;
+  dmc?: number | null;
+  dc?: number | null;
+  isi?: number | null;
+  bui?: number | null;
   updatedAt: string | null;
   sourceTopic: string | null;
 }
-
-
 
 export interface MqttStatusSnapshot {
   brokerUrl: string;
@@ -113,6 +127,7 @@ const emptySensorSnapshot: MqttSensorSnapshot = {
   temperature: null,
   humidity: null,
   soil_moisture: null,
+  ph: null,
   updatedAt: null,
   sourceTopic: null,
 };
@@ -210,8 +225,8 @@ function setSensorSnapshot(next: SensorDelta, sourceTopic: string, force = false
     };
 
     // Deduplikasi: jika nilai sensor identik, jangan emit ulang
-    const prevKey = JSON.stringify({ t: prevNode.temperature, h: prevNode.humidity, s: prevNode.soil_moisture });
-    const nextKey = JSON.stringify({ t: mergedNode.temperature, h: mergedNode.humidity, s: mergedNode.soil_moisture });
+    const prevKey = JSON.stringify({ t: prevNode.temperature, h: prevNode.humidity, s: prevNode.soil_moisture, p: prevNode.ph });
+    const nextKey = JSON.stringify({ t: mergedNode.temperature, h: mergedNode.humidity, s: mergedNode.soil_moisture, p: mergedNode.ph });
     if (!force && prevKey === nextKey) {
       // Data sensor sama persis, skip re-render
       return;
@@ -277,6 +292,7 @@ async function persistSensorDataToApi(payload: string, parsed: SensorDelta) {
     temperature: parsed.temperature ?? undefined,
     humidity: parsed.humidity ?? undefined,
     soil_moisture: parsed.soil_moisture ?? undefined,
+    ph: parsed.ph ?? undefined,
   });
 
   if (lastPersistedSensorJson === normalized && now - lastPersistedSensorAt < SENSOR_PERSIST_INTERVAL_MS) {
@@ -413,6 +429,16 @@ function normalizeJsonSensorPayload(payload: string): SensorDelta | null {
       temperature: parseNumeric(obj.temperature),
       humidity: parseNumeric(obj.humidity),
       soil_moisture: parseNumeric(obj.soil_moisture),
+      ph: parseNumeric(obj.ph),
+      soil_temp: parseNumeric(obj.soil_temp ?? obj.battery),
+      fwi: parseNumeric(obj.fwi ?? obj.fwi_score),
+      fwi_level: parseNumeric(obj.fwi_level),
+      fwi_status: typeof obj.fwi_status === 'string' ? obj.fwi_status : undefined,
+      ffmc: parseNumeric(obj.ffmc),
+      dmc: parseNumeric(obj.dmc),
+      dc: parseNumeric(obj.dc),
+      isi: parseNumeric(obj.isi),
+      bui: parseNumeric(obj.bui),
     };
   } catch {
     return null;
@@ -472,7 +498,13 @@ function updateFromTopic(topic: string, payload: string) {
     return;
   }
 
-  if (topic === TOPIC_SENSOR_JSON || topic.startsWith('sproutai/sensor/node/')) {
+  if (
+    topic === TOPIC_SENSOR_JSON ||
+    topic === TOPIC_PH ||
+    topic === TOPIC_KARHUTLA_FWI ||
+    topic === TOPIC_KARHUTLA_ALERT ||
+    topic.startsWith('sproutai/sensor/node/')
+  ) {
     const parsed = normalizeJsonSensorPayload(payload);
     if (parsed) {
       setSensorSnapshot(parsed, topic, true);

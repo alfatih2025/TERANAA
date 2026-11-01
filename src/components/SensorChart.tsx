@@ -12,15 +12,17 @@ import { SensorData } from '../hooks/useSensorData';
 
 interface SensorChartProps {
   data: any[];
-  type: 'temperature' | 'humidity' | 'soil_moisture';
+  type: 'temperature' | 'humidity' | 'soil_moisture' | 'soil_temp' | 'fwi';
   title: string;
   color: string;
 }
 
-const typeConfig = {
-  temperature: { label: 'Suhu (°C)', min: 15, max: 45 },
-  humidity: { label: 'Kelembapan (%)', min: 0, max: 100 },
-  soil_moisture: { label: 'Kelembapan Tanah (%)', min: 0, max: 100 },
+const typeConfig: Record<string, { label: string; min: number; max: number }> = {
+  temperature: { label: 'Suhu Udara (°C)', min: 15, max: 45 },
+  humidity: { label: 'Kelembapan Udara (%)', min: 0, max: 100 },
+  soil_moisture: { label: 'Kadar Air Tanah (%)', min: 0, max: 100 },
+  soil_temp: { label: 'Suhu Kedalaman Tanah (°C)', min: 15, max: 65 },
+  fwi: { label: 'Indeks FWI BMKG (0-50+)', min: 0, max: 50 },
 };
 
 export function SensorChart({ data, type, title, color }: SensorChartProps) {

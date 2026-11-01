@@ -91,7 +91,7 @@ export function Monitoring() {
                 : 'text-slate-600 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
             }`}
           >
-            Node 1 (Bedeng A)
+            Node 1
           </button>
           <button
             onClick={() => setActiveNode(2)}
@@ -101,7 +101,7 @@ export function Monitoring() {
                 : 'text-slate-600 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
             }`}
           >
-            Node 2 (Bedeng B)
+            Node 2
           </button>
           <button
             onClick={() => setActiveNode(3)}

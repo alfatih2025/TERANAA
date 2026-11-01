@@ -127,13 +127,6 @@ export function Dashboard({ sensorData, settings, weatherData }: DashboardProps)
         </button>
       </div>
 
-      {/* Monitoring Card Khusus Karhutla (Jika diaktifkan atau sensor Node 3 aktif) */}
-      {karhutlaEnabled && (
-        <div className="space-y-2">
-          <KarhutlaCard data={node3} isOnline={isNode3Online} />
-        </div>
-      )}
-
       {/* Node Cards Pertanian (Node 1 & Node 2) */}
       <div className="grid grid-cols-1 gap-3 sm:gap-6 lg:grid-cols-2">
         <NodeCard 
@@ -147,6 +140,13 @@ export function Dashboard({ sensorData, settings, weatherData }: DashboardProps)
           data={node2}
         />
       </div>
+
+      {/* Monitoring Card Khusus Karhutla (Jika diaktifkan atau sensor Node 3 aktif) */}
+      {karhutlaEnabled && (
+        <div className="space-y-2">
+          <KarhutlaCard data={node3} isOnline={isNode3Online} />
+        </div>
+      )}
 
       {/* Comparison Panel */}
       <div className="glass-card p-4 sm:p-6 border border-slate-200 dark:border-slate-800">

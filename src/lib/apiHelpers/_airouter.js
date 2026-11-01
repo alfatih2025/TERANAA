@@ -77,7 +77,7 @@ function buildSystemPrompt(sensor) {
   ].join('\n') : 'Data sensor belum tersedia.';
 
   return [
-    'Kamu adalah AI Router dan Analis Cerdas untuk TERANA.',
+    'Kamu adalah AI Router dan Analis Cerdas untuk TeraNova.',
     'Berikan analisis berdasarkan data sensor.',
     'Tugas utamamu adalah merespons pertanyaan pengguna. Namun, di AKHIR balasanmu, kamu WAJIB menyertakan blok JSON yang berisi ringkasan keputusan untuk keperluan UI.',
     'Pahami bahasa Indonesia baku maupun tidak baku, termasuk slang, singkatan, typo ringan, dan campuran istilah sehari-hari.',
@@ -162,7 +162,7 @@ async function callProvider(provider, model, messages, temperature, maxTokens, o
   if (provider === 'openrouter') {
     endpoint = 'https://openrouter.ai/api/v1/chat/completions';
     headers['HTTP-Referer'] = origin;
-    headers['X-Title'] = 'TERANA';
+    headers['X-Title'] = 'TeraNova';
   } else if (provider === 'groq') {
     endpoint = 'https://api.groq.com/openai/v1/chat/completions';
   }

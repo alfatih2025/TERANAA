@@ -31,7 +31,7 @@ export default async function handler(req, res) {
 
     if (isArduinoFormulaRequest(message)) {
       const formulaContent = [
-        '## Rumus Arduino TERANA',
+        '## Rumus Arduino TeraNova',
         '',
         buildFormulaReference(),
       ].join('\n');

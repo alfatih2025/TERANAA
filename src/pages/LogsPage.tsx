@@ -204,7 +204,7 @@ export function LogsPage() {
   }, [filteredItems]);
 
   const exportFiltered = (format: 'csv' | 'json') => {
-    const filenameBase = `nexagrow_${selectedDate}`;
+    const filenameBase = `teranova_${selectedDate}`;
     if (format === 'csv') {
       const blob = new Blob([toCsv(filteredItems)], { type: 'text/csv;charset=utf-8' });
       const url = window.URL.createObjectURL(blob);

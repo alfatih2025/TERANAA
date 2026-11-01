@@ -1,6 +1,6 @@
-# NexaGrow ESP32 - Smart Farming Automation System
+# TeraNova ESP32 - Smart Farming Automation System
 
-**NexaGrow** adalah sistem otomatisasi pertanian cerdas berbasis **ESP32** yang terintegrasi dengan **Arduino Nano**, sensor lingkungan, aktuator, dan platform **IoT MQTT**. Sistem ini dirancang untuk memonitor dan mengontrol penyiraman tanaman secara otomatis maupun manual, dengan dukungan data cuaca real-time dari **BMKG** serta rekomendasi berbasis AI.
+**TeraNova** adalah sistem otomatisasi pertanian cerdas berbasis **ESP32** yang terintegrasi dengan **Arduino Nano**, sensor lingkungan, aktuator, dan platform **IoT MQTT**. Sistem ini dirancang untuk memonitor dan mengontrol penyiraman tanaman secara otomatis maupun manual, dengan dukungan data cuaca real-time dari **BMKG** serta rekomendasi berbasis AI.
 
 ---
 
@@ -24,7 +24,7 @@
 
 ## 1. Gambaran Umum Sistem
 
-NexaGrow adalah sistem **IoT Smart Farming** yang mengintegrasikan:
+TeraNova adalah sistem **IoT Smart Farming** yang mengintegrasikan:
 
 | Komponen | Peran |
 |----------|-------|

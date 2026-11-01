@@ -1,10 +1,6 @@
 import mqtt from 'mqtt';
 import supabase from '../lib/apiHelpers/_supabase.js';
 
-// Konfigurasi API Laravel Railway
-const LARAVEL_API_URL = 'https://backendnexa-production-adce.up.railway.app/api/sensor-data';
-const LARAVEL_API_KEY = 'NXG_2026_x7f83K2Lm91';
-
 export function startMqttWorker() {
   const brokerUrl = process.env.VITE_BROKER_URL || 'wss://a4e9379a555f47669c90f4c69b75eeda.s1.eu.hivemq.cloud:8884/mqtt';
   // Use mqtts port 8883 for NodeJS client instead of wss
@@ -54,10 +50,6 @@ export function startMqttWorker() {
         console.log(`[MQTT Worker] Saved data for node ${nodeId} to Supabase`);
       }
 
-      // 2. TERUSKAN KE LARAVEL RAILWAY (Server-to-Server)
-      // Tambahkan ke antrean untuk dikirim secara batch
-      laravelBuffer.push(sensorPayload);
-
     } catch (e) {
       console.error('[MQTT Worker] Error processing message:', e.message);
     }
@@ -67,71 +59,3 @@ export function startMqttWorker() {
     console.error('[MQTT Worker] MQTT Error:', err.message);
   });
 }
-
-// ============================================================================
-// LOGIKA BATCHING & BACKOFF KE LARAVEL
-// ============================================================================
-let laravelBuffer = [];
-let backoffDelayMs = 0;
-let lastRateLimitAt = 0;
-let isSending = false;
-
-setInterval(async () => {
-  if (laravelBuffer.length === 0 || isSending) return;
-
-  // Jika sedang dalam masa hukuman (backoff) karena 429
-  if (backoffDelayMs > 0 && (Date.now() - lastRateLimitAt) < backoffDelayMs) {
-    return; // Tunggu
-  }
-
-  isSending = true;
-  
-  // Ambil maksimal 10 data sekaligus dari antrean
-  const batchSize = Math.min(laravelBuffer.length, 10);
-  const batchPayload = laravelBuffer.slice(0, batchSize);
-
-  // Send items one by one to avoid 500 Error in Laravel if it doesn't support arrays
-  let sentCount = 0;
-  for (const item of batchPayload) {
-    try {
-      const laravelRes = await fetch(LARAVEL_API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': LARAVEL_API_KEY
-        },
-        body: JSON.stringify(item)
-      });
-      
-      if (laravelRes.status === 429) {
-        backoffDelayMs = backoffDelayMs === 0 ? 15000 : Math.min(backoffDelayMs * 2, 300000);
-        lastRateLimitAt = Date.now();
-        console.warn(`[MQTT Worker] Laravel 429 Too Many Requests. Backoff for ${backoffDelayMs/1000}s`);
-        break; // Stop sending this batch, will retry remaining next time
-      } else if (!laravelRes.ok) {
-        console.warn(`[MQTT Worker] Forward to Laravel failed with status ${laravelRes.status}`);
-        sentCount++; // count as processed so we don't get stuck
-      } else {
-        sentCount++;
-        backoffDelayMs = 0; // reset backoff on success
-      }
-    } catch (fetchErr) {
-      console.error('[MQTT Worker] Failed to reach Laravel:', fetchErr.message);
-      break; // stop on network error
-    }
-  }
-
-  // Remove processed items from buffer
-  if (sentCount > 0) {
-    console.log(`[MQTT Worker] Processed ${sentCount} records to Laravel`);
-    laravelBuffer = laravelBuffer.slice(sentCount);
-  }
-  
-  isSending = false;
-  
-  // Keamanan jika buffer terlalu penuh (misal server Laravel mati berhari-hari)
-  if (laravelBuffer.length > 500) {
-    console.warn('[MQTT Worker] Laravel buffer full! Dropping oldest 100 records');
-    laravelBuffer = laravelBuffer.slice(100);
-  }
-}, 5000); // Cek dan kirim setiap 5 detik

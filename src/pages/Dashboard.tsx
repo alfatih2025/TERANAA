@@ -70,7 +70,7 @@ export function Dashboard({ sensorData, settings, weatherData }: DashboardProps)
           <div className="min-w-0">
             <h1 className="text-xl sm:text-2xl md:text-3xl text-slate-900 dark:text-white font-black tracking-tight mb-2 flex items-center gap-2">
               <Network className="w-6 h-6 sm:w-8 sm:h-8 text-blue-600 dark:text-blue-400 flex-shrink-0" />
-              <span>TERANA (Terrain Intelligent Systems)</span>
+              <span>TeraNova</span>
             </h1>
             <p className="text-slate-600 dark:text-slate-300 text-xs sm:text-sm md:text-base max-w-xl">
               Platform smart agriculture & mitigasi bencana lahan gambut berbasis AIoT.
@@ -135,14 +135,14 @@ export function Dashboard({ sensorData, settings, weatherData }: DashboardProps)
       )}
 
       {/* Node Cards Pertanian (Node 1 & Node 2) */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 gap-3 sm:gap-6 lg:grid-cols-2">
         <NodeCard 
           nodeName="Wemos Node 1"
           nodeId={1}
           data={node1}
         />
         <NodeCard 
-          nodeName="Wemos Node 2)"
+          nodeName="Wemos Node 2"
           nodeId={2}
           data={node2}
         />

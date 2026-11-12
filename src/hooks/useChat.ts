@@ -1,4 +1,4 @@
-import { buildFirebaseAuthHeaders, buildOptionalFirebaseAuthHeaders } from '../lib/apiAuth';
+import { buildOptionalFirebaseAuthHeaders } from '../lib/apiAuth';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { SensorSnapshotContext } from '../services/openrouter';
 import type { DailyHistory } from './useDailyHistory';
@@ -38,7 +38,8 @@ function createMessage(role: 'user' | 'assistant', content: string, images?: str
 }
 
 async function fetchApiMessages(): Promise<ChatMessage[]> {
-  const response = await fetch('/api/chat', { headers: await buildFirebaseAuthHeaders() });
+  const response = await fetch('/api/chat', { headers: await buildOptionalFirebaseAuthHeaders() });
+  if (response.status === 401) return [];
   if (!response.ok) {
     throw new Error(`Chat API tidak merespons (${response.status})`);
   }
@@ -128,7 +129,7 @@ export function useChat() {
   const loadYesterdayHistory = useCallback(async () => {
     try {
       const response = await fetch('/api/chat-daily-history?target=yesterday', {
-        headers: await buildFirebaseAuthHeaders(),
+        headers: await buildOptionalFirebaseAuthHeaders(),
       });
 
       if (response.ok) {
@@ -234,7 +235,7 @@ export function useChat() {
       try {
         const response = await fetch('/api/airouter', {
           method: 'POST',
-          headers: await buildFirebaseAuthHeaders({ 'Content-Type': 'application/json' }),
+          headers: await buildOptionalFirebaseAuthHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             message: displayMessage,
             images: images || [],

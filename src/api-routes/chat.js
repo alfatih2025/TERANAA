@@ -1,4 +1,4 @@
-import { requireFirebaseAuth, authError } from '../lib/apiHelpers/_auth.js';
+import { getOptionalFirebaseAuth, requireFirebaseAuth, authError } from '../lib/apiHelpers/_auth.js';
 import supabase from '../lib/apiHelpers/_supabase.js';
 
 const OPENROUTER_API_KEY =
@@ -172,12 +172,21 @@ function generateDailyReport(latestSensor) {
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(204).end();
 
-  const authenticatedUser = await requireFirebaseAuth(req, res);
-  if (!authenticatedUser) return;
+  let authenticatedUser;
+  if (req.method === 'DELETE') {
+    authenticatedUser = await getOptionalFirebaseAuth(req, res);
+    if (res.headersSent) return;
+    if (!authenticatedUser) {
+      return res.status(200).json({ success: true, localOnly: true, date: getJakartaDateKey() });
+    }
+  } else {
+    authenticatedUser = await requireFirebaseAuth(req, res);
+    if (!authenticatedUser) return;
+  }
 
   try {
     if (req.method === 'GET') {

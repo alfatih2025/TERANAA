@@ -114,29 +114,33 @@ const COMMAND_MAP = {
 // FUNGSI UTILITY KIRIM MQTT - ASYNC (OPTIMAL UNTUK SERVERLESS/VERCEL)
 // =====================================================================
 async function publishToMqttBroker(topic, payload) {
-  // Secara fleksibel mendeteksi variabel MQTT standar maupun variabel VITE_ milik frontend
-  let brokerUrl = process.env.MQTT_SERVER || process.env.VITE_BROKER_URL || 'broker.hivemq.com';
-  const username = process.env.MQTT_USERNAME || process.env.VITE_MQTT_USERNAME || '';
-  const password = process.env.MQTT_PASSWORD || process.env.VITE_MQTT_PASSWORD || '';
-  const defaultPort = Number(process.env.MQTT_PORT || 1883);
+  const brokerUrl = process.env.MQTT_SERVER?.trim();
+  const username = process.env.MQTT_USERNAME?.trim();
+  const password = process.env.MQTT_PASSWORD;
+  const defaultPort = Number(process.env.MQTT_PORT || 8883);
 
-  // Jika broker menggunakan protokol wss (WebSocket Secure), pastikan opsi konfigurasi path '/mqtt' disesuaikan
-  const options = {
-    username: username,
-    password: password,
-    connectTimeout: 7000,
-    rejectUnauthorized: false, // Menghindari kegagalan TLS handshake di serverless cloud
-  };
-
-  // Jika URL broker belum menyertakan port spesifik, gunakan defaultPort
-  if (!/:[0-9]+/.test(brokerUrl)) {
-    options.port = defaultPort;
+  if (!brokerUrl || !username || !password) {
+    throw new Error('Server MQTT credentials are not configured');
   }
 
-  console.log(`[MQTT Client] Mencoba koneksi async ke ${brokerUrl}`);
+  const mqttUrl = /^wss?:\/\//i.test(brokerUrl)
+    ? brokerUrl.replace(/^wss?:\/\//i, 'mqtts://').replace(/:8884\/mqtt\/?$/i, ':8883')
+    : /^[a-z][a-z\d+.-]*:\/\//i.test(brokerUrl)
+      ? brokerUrl
+      : /:\d+$/.test(brokerUrl)
+        ? `mqtts://${brokerUrl}`
+        : `mqtts://${brokerUrl}:${defaultPort}`;
+
+  const options = {
+    username,
+    password,
+    connectTimeout: 7000,
+  };
+
+  console.log('[MQTT Client] Connecting to configured broker');
   
   // Membuka koneksi, mengirimkan pesan dengan QoS 1 (At Least Once) & Retain, lalu langsung memutuskannya secara aman
-  const client = await mqtt.connectAsync(brokerUrl, options);
+  const client = await mqtt.connectAsync(mqttUrl, options);
   await client.publishAsync(topic, payload, { qos: 1, retain: true });
   await client.endAsync();
   

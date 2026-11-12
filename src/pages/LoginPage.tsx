@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useAuth } from '../hooks/useAuth';
+import { useAuth } from '../hooks/useAuthContext';
 import { motion } from 'framer-motion';
 import { Leaf, AlertCircle } from 'lucide-react';
 

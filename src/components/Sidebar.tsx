@@ -14,7 +14,7 @@ import {
   Network,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useAuth } from '../hooks/useAuth';
+import { useAuth } from '../hooks/useAuthContext';
 import { LogOut } from 'lucide-react';
 import logo from '../assets/nexagrow-logo.png';
 

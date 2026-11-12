@@ -1,29 +1,27 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { auth, db, googleAuthProvider } from '../lib/firebase';
-import { signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, onSnapshot, deleteDoc } from 'firebase/firestore';
+import { AuthContext, type Role, type User } from './auth-context';
 
-export type Role = 'admin' | 'user';
+export type { Role, User } from './auth-context';
+const OWNER_ADMIN_EMAIL = 'alfatihwibowo264@gmail.com';
 
-export interface User {
-  id: string;
-  username: string;
-  role: Role;
-  email: string;
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
-interface AuthContextType {
-  currentUser: User | null;
-  users: User[];
-  login: () => Promise<boolean>;
-  logout: () => Promise<void>;
-  addUser: (email: string, role?: Role) => Promise<boolean>;
-  removeUser: (id: string) => Promise<void>;
-  loading: boolean;
-  authError: string;
+function getErrorCode(error: unknown) {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    typeof error.code === 'string'
+  ) {
+    return error.code;
+  }
+  return 'unknown';
 }
-
-const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -32,14 +30,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [authError, setAuthError] = useState<string>('');
 
   useEffect(() => {
-    if (currentUser?.role !== 'admin') {
-      setUsers([]);
-      return;
-    }
+    if (currentUser?.role !== 'admin') return;
     const unsubscribeUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
       const usersData: User[] = [];
       snapshot.forEach((d) => usersData.push(d.data() as User));
       setUsers(usersData);
+    }, (error) => {
+      console.error('Gagal memuat daftar pengguna:', error);
+      setAuthError(`Gagal memuat daftar pengguna: ${error.message}`);
     });
     return () => unsubscribeUsers();
   }, [currentUser?.role]);
@@ -56,52 +54,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      setUsers([]);
       if (firebaseUser && firebaseUser.email) {
         try {
           const docId = firebaseUser.email.toLowerCase();
           const userDoc = await getDoc(doc(db, 'users', docId));
-          
-          const isOwner = docId.includes('alfatihwibowo') || docId.includes('princealf') || docId.includes('alfatih');
+          const isOwner = docId === OWNER_ADMIN_EMAIL;
 
           if (userDoc.exists()) {
             const data = userDoc.data();
-            let role = data.role as Role;
+            const storedRole: Role = data.role === 'admin' ? 'admin' : 'user';
             
-            // Paksa jadikan admin jika ini adalah akun pemilik (meskipun sebelumnya tersimpan sebagai user)
-            if (isOwner && role !== 'admin') {
-              role = 'admin';
+            if (isOwner && storedRole !== 'admin') {
               await setDoc(doc(db, 'users', docId), { role: 'admin' }, { merge: true });
             }
 
             setCurrentUser({
               id: firebaseUser.uid,
               username: data.username || data.email?.split('@')[0] || 'User',
-              email: data.email,
-              role: role
+              email: data.email || firebaseUser.email,
+              role: isOwner || storedRole === 'admin' ? 'admin' : 'user'
             });
           } else {
-            // Jika belum ada di database, cek apakah dia admin pertama
             const role: Role = isOwner ? 'admin' : 'user';
-            
             const newUser = {
               id: firebaseUser.uid,
               username: firebaseUser.email?.split('@')[0] || 'User',
               email: firebaseUser.email,
               role
             };
-            // Gunakan email sebagai ID agar mudah diundang
-            await setDoc(doc(db, 'users', docId), newUser);
+            if (isOwner) {
+              await setDoc(doc(db, 'users', docId), newUser);
+            }
             setCurrentUser(newUser);
           }
-        } catch (firestoreError: any) {
+        } catch (firestoreError: unknown) {
           console.error('Firestore Error saat login:', firestoreError);
           setCurrentUser({
             id: firebaseUser.uid,
             username: firebaseUser.email?.split('@')[0] || 'User',
             email: firebaseUser.email || '',
-            role: firebaseUser.email === 'alfatihwibowo264@gmail.com' ? 'admin' : 'user'
+            role: firebaseUser.email?.toLowerCase() === OWNER_ADMIN_EMAIL ? 'admin' : 'user'
           });
-          setAuthError(`Peringatan Firestore: ${firestoreError.message} (Login dilanjutkan di memori)`);
+          setAuthError(`Peringatan Firestore: ${getErrorMessage(firestoreError)} (Login dilanjutkan di memori)`);
         }
       } else {
         setCurrentUser(null);
@@ -121,18 +116,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setAuthError('');
       await signInWithPopup(auth, googleAuthProvider);
       return true;
-    } catch (error: any) {
-      if (error.code === 'auth/popup-blocked') {
+    } catch (error: unknown) {
+      const code = getErrorCode(error);
+      const message = getErrorMessage(error);
+      if (code === 'auth/popup-blocked') {
         console.warn('Popup diblokir, menggunakan redirect...');
         await signInWithRedirect(auth, googleAuthProvider);
         return true;
       }
-      if (error.code === 'auth/popup-closed-by-user') {
+      if (code === 'auth/popup-closed-by-user') {
          throw new Error('Proses login dibatalkan.');
       }
       console.error('Login error full:', error);
-      setAuthError(`Gagal login: ${error.code} - ${error.message}`);
-      throw new Error(`Gagal login: ${error.code} - ${error.message}`);
+      setAuthError(`Gagal login: ${code} - ${message}`);
+      throw new Error(`Gagal login: ${code} - ${message}`);
     }
   };
 
@@ -141,7 +138,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await signOut(auth);
   };
 
-  const addUser = async (email: string, role: Role = 'admin') => {
+  const addUser = async (email: string, role: Role = 'user') => {
     try {
       const docId = email.toLowerCase().trim();
       const existing = await getDoc(doc(db, 'users', docId));
@@ -177,10 +174,4 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       {children}
     </AuthContext.Provider>
   );
-}
-
-export function useAuth() {
-  const context = useContext(AuthContext);
-  if (!context) throw new Error('useAuth must be used within AuthProvider');
-  return context;
 }

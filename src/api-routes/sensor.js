@@ -38,8 +38,22 @@ async function cleanupOldSensorData() {
 // Publish to MQTT asynchronously in background without delaying HTTP response to ESP32 Gateway
 function publishToMqttAsync(data, nodeId, sensorPayload) {
   try {
-    const brokerUrl = process.env.VITE_BROKER_URL || 'wss://a4e9379a555f47669c90f4c69b75eeda.s1.eu.hivemq.cloud:8884/mqtt';
-    const mqttUrl = brokerUrl.replace('wss://', 'mqtts://').replace(':8884/mqtt', ':8883');
+    const brokerUrl = process.env.MQTT_SERVER?.trim();
+    const username = process.env.MQTT_USERNAME?.trim();
+    const password = process.env.MQTT_PASSWORD;
+    if (!brokerUrl || !username || !password) {
+      console.warn('[MQTT Async Publish] MQTT server credentials are not configured');
+      return;
+    }
+
+    const defaultPort = Number(process.env.MQTT_PORT || 8883);
+    const mqttUrl = /^wss?:\/\//i.test(brokerUrl)
+      ? brokerUrl.replace(/^wss?:\/\//i, 'mqtts://').replace(/:8884\/mqtt\/?$/i, ':8883')
+      : /^[a-z][a-z\d+.-]*:\/\//i.test(brokerUrl)
+        ? brokerUrl
+        : /:\d+$/.test(brokerUrl)
+          ? `mqtts://${brokerUrl}`
+          : `mqtts://${brokerUrl}:${defaultPort}`;
     const realtimePayload = normalizeRow(data) || {
       ...sensorPayload,
       device_id: `node_${nodeId}`,
@@ -47,8 +61,8 @@ function publishToMqttAsync(data, nodeId, sensorPayload) {
     };
 
     const client = mqtt.connect(mqttUrl, {
-      username: process.env.VITE_MQTT_USERNAME || 'NexaGrowv2',
-      password: process.env.VITE_MQTT_PASSWORD || 'NexaGrow12345',
+      username,
+      password,
       connectTimeout: 3000,
     });
 
@@ -112,7 +126,7 @@ export default async function handler(req, res) {
           latestByNode.set(normalized.node_id, normalized);
         }
 
-        return res.status(200).json([1, 2].map((nodeId) => latestByNode.get(nodeId)).filter(Boolean));
+        return res.status(200).json([1, 2, 3].map((nodeId) => latestByNode.get(nodeId)).filter(Boolean));
       }
 
       if (latest === 'true') {
@@ -158,14 +172,16 @@ export default async function handler(req, res) {
       ).trim();
 
       const validApiKeys = [
+        process.env.SENSOR_API_KEY,
         process.env.SECRET_API_KEY,
         process.env.API_AUTH_TOKEN,
-        process.env.VITE_API_AUTH_TOKEN,
-        'NexaGrow_SecretKey_2026',
-        'NXG_2026_x7f83K2Lm91',
       ]
         .map((value) => String(value || '').trim())
         .filter(Boolean);
+
+      if (validApiKeys.length === 0) {
+        return res.status(503).json({ error: 'Sensor API authentication is not configured' });
+      }
 
       if (!validApiKeys.includes(apiKey)) {
         return res.status(401).json({ error: 'Unauthorized: Invalid API Key' });
@@ -174,8 +190,8 @@ export default async function handler(req, res) {
       const body = req.body || {};
 
       const nodeId = Number(body.node_id);
-      if (!Number.isInteger(nodeId) || (nodeId !== 1 && nodeId !== 2)) {
-        return res.status(400).json({ error: 'node_id must be 1 or 2' });
+      if (!Number.isInteger(nodeId) || (nodeId !== 1 && nodeId !== 2 && nodeId !== 3)) {
+        return res.status(400).json({ error: 'node_id must be 1, 2, or 3' });
       }
 
       const sensorPayload = {
@@ -183,6 +199,7 @@ export default async function handler(req, res) {
         temperature: toNumber(body.temperature, null),
         humidity: toNumber(body.humidity, null),
         soil_moisture: toNumber(body.soil_moisture, null),
+        soil_temp: toNumber(body.soil_temp ?? body.battery, null),
       };
 
       const { data, error } = await supabase

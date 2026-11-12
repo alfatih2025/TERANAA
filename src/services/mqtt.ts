@@ -1,12 +1,8 @@
-import mqtt, { type MqttClient } from 'mqtt';
+import type { MqttClient } from 'mqtt';
 
-const DEFAULT_BROKER_URL = 'wss://a4e9379a555f47669c90f4c69b75eeda.s1.eu.hivemq.cloud:8884/mqtt';
-const DEFAULT_MQTT_USERNAME = 'NexaGrowv2';
-const DEFAULT_MQTT_PASSWORD = 'NexaGrow12345';
-
-const BROKER_URL = (import.meta.env.VITE_BROKER_URL as string | undefined)?.trim() || DEFAULT_BROKER_URL;
-const MQTT_USERNAME = (import.meta.env.VITE_MQTT_USERNAME as string | undefined)?.trim() || DEFAULT_MQTT_USERNAME;
-const MQTT_PASSWORD = (import.meta.env.VITE_MQTT_PASSWORD as string | undefined)?.trim() || DEFAULT_MQTT_PASSWORD;
+const BROKER_URL = (import.meta.env.VITE_BROKER_URL as string | undefined)?.trim() || '';
+const MQTT_USERNAME = (import.meta.env.VITE_MQTT_USERNAME as string | undefined)?.trim() || '';
+const MQTT_PASSWORD = (import.meta.env.VITE_MQTT_PASSWORD as string | undefined)?.trim() || '';
 
 const WEB_STATUS_TOPIC = 'sproutai/web/status';
 const DEVICE_STATUS_TOPIC = 'sproutai/esp32/status';
@@ -26,18 +22,22 @@ const TOPIC_SCHEDULE_CMD = 'sproutai/schedule/cmd';
 const TOPIC_SCHEDULE_STATUS = 'sproutai/schedule/status';
 const TOPIC_SENSOR_JSON = 'sproutai/sensor/data';
 const TOPIC_SENSOR_NODE = 'sproutai/sensor/node/+';
+const TOPIC_PH = 'sproutai/sensor/ph';
 const TOPIC_RAIN_CHANCE = 'sproutai/weather/rain_chance';
 const TOPIC_SOIL = 'sproutai/sensor/soil';
 const TOPIC_TEMP = 'sproutai/sensor/temp';
 const TOPIC_HUMIDITY = 'sproutai/sensor/humidity';
 const TOPIC_SCORE = 'sproutai/sensor/score';
 const TOPIC_SYSTEM_FAULT = 'sproutai/system/fault';
+const TOPIC_FWI = 'sproutai/karhutla/fwi';
 
 const SUBSCRIBE_TOPICS = [
   DEVICE_STATUS_TOPIC,
   SYSTEM_STATUS_TOPIC,
   TOPIC_SENSOR_JSON,
   TOPIC_SENSOR_NODE,
+  TOPIC_FWI,
+  TOPIC_PH,
   TOPIC_SOIL,
   TOPIC_TEMP,
   TOPIC_HUMIDITY,
@@ -66,11 +66,14 @@ export interface MqttSensorSnapshot {
   temperature: number | null;
   humidity: number | null;
   soil_moisture: number | null;
+  soil_temp?: number | null;
+  fwi?: number | null;
+  fwi_level?: number | null;
+  fwi_status?: string | null;
+  ph: number | null;
   updatedAt: string | null;
   sourceTopic: string | null;
 }
-
-
 
 export interface MqttStatusSnapshot {
   brokerUrl: string;
@@ -113,6 +116,11 @@ const emptySensorSnapshot: MqttSensorSnapshot = {
   temperature: null,
   humidity: null,
   soil_moisture: null,
+  soil_temp: null,
+  fwi: null,
+  fwi_level: null,
+  fwi_status: null,
+  ph: null,
   updatedAt: null,
   sourceTopic: null,
 };
@@ -210,8 +218,8 @@ function setSensorSnapshot(next: SensorDelta, sourceTopic: string, force = false
     };
 
     // Deduplikasi: jika nilai sensor identik, jangan emit ulang
-    const prevKey = JSON.stringify({ t: prevNode.temperature, h: prevNode.humidity, s: prevNode.soil_moisture });
-    const nextKey = JSON.stringify({ t: mergedNode.temperature, h: mergedNode.humidity, s: mergedNode.soil_moisture });
+    const prevKey = JSON.stringify({ t: prevNode.temperature, h: prevNode.humidity, s: prevNode.soil_moisture, p: prevNode.ph });
+    const nextKey = JSON.stringify({ t: mergedNode.temperature, h: mergedNode.humidity, s: mergedNode.soil_moisture, p: mergedNode.ph });
     if (!force && prevKey === nextKey) {
       // Data sensor sama persis, skip re-render
       return;
@@ -277,6 +285,7 @@ async function persistSensorDataToApi(payload: string, parsed: SensorDelta) {
     temperature: parsed.temperature ?? undefined,
     humidity: parsed.humidity ?? undefined,
     soil_moisture: parsed.soil_moisture ?? undefined,
+    ph: parsed.ph ?? undefined,
   });
 
   if (lastPersistedSensorJson === normalized && now - lastPersistedSensorAt < SENSOR_PERSIST_INTERVAL_MS) {
@@ -286,12 +295,18 @@ async function persistSensorDataToApi(payload: string, parsed: SensorDelta) {
   lastPersistedSensorJson = normalized;
   lastPersistedSensorAt = now;
 
+  const apiToken = (import.meta.env.VITE_API_AUTH_TOKEN as string | undefined)?.trim();
+  if (!apiToken) {
+    console.warn('[SENSOR PERSIST] VITE_API_AUTH_TOKEN is not configured; skipping API write');
+    return;
+  }
+
   try {
     await fetch('/api/sensor', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': (import.meta.env.VITE_API_AUTH_TOKEN as string) || 'NXG_2026_x7f83K2Lm91',
+        'x-api-key': apiToken,
       },
       body: normalized,
     });
@@ -413,6 +428,11 @@ function normalizeJsonSensorPayload(payload: string): SensorDelta | null {
       temperature: parseNumeric(obj.temperature),
       humidity: parseNumeric(obj.humidity),
       soil_moisture: parseNumeric(obj.soil_moisture),
+      soil_temp: parseNumeric(obj.soil_temp ?? obj.battery),
+      fwi: parseNumeric(obj.fwi),
+      fwi_level: parseNumeric(obj.fwi_level),
+      fwi_status: typeof obj.fwi_status === 'string' ? obj.fwi_status : undefined,
+      ph: parseNumeric(obj.ph),
     };
   } catch {
     return null;
@@ -472,7 +492,7 @@ function updateFromTopic(topic: string, payload: string) {
     return;
   }
 
-  if (topic === TOPIC_SENSOR_JSON || topic.startsWith('sproutai/sensor/node/')) {
+  if (topic === TOPIC_SENSOR_JSON || topic === TOPIC_PH || topic === TOPIC_FWI || topic.startsWith('sproutai/sensor/node/')) {
     const parsed = normalizeJsonSensorPayload(payload);
     if (parsed) {
       setSensorSnapshot(parsed, topic, true);
@@ -511,7 +531,7 @@ function updateFromTopic(topic: string, payload: string) {
   }
 }
 
-function connectOnce() {
+async function connectOnce() {
   if (client || !BROKER_URL) return client;
 
   if (!isWebSocketBroker(BROKER_URL)) {
@@ -522,6 +542,9 @@ function connectOnce() {
     });
     return null;
   }
+
+  const { default: mqtt } = await import('mqtt');
+  if (client) return client;
 
   client = mqtt.connect(BROKER_URL, {
     username: MQTT_USERNAME || undefined,
@@ -547,7 +570,9 @@ function connectOnce() {
       client?.subscribe(topic, { qos: 1 });
     }
 
-    announceWebPresence('online').catch(() => {});
+    announceWebPresence('online').catch((error: unknown) => {
+      console.error('[MQTT] gagal mengirim status web:', error);
+    });
     setSnapshot({ webPublishedAt: new Date().toISOString() });
   });
 
@@ -631,7 +656,7 @@ if (typeof window !== 'undefined') {
   window.setInterval(() => emit(), 3000);
 }
 
-export function getMqttClient() {
+export async function getMqttClient() {
   return connectOnce();
 }
 
@@ -656,15 +681,15 @@ export function subscribeMqttStatus(listener: () => void) {
   return () => listeners.delete(listener);
 }
 
-export function publishMqtt(
+export async function publishMqtt(
   topic: string,
   payload: string,
   options: Record<string, unknown> = {},
 ) {
-  const currentClient = connectOnce();
+  const currentClient = await connectOnce();
   if (!currentClient) {
     console.error('[MQTT] client unavailable for publish', topic, payload);
-    return Promise.reject(new Error('MQTT client belum tersedia'));
+    throw new Error('MQTT client belum tersedia');
   }
 
   console.debug('[MQTT] publish', {
@@ -728,7 +753,7 @@ export function publishMqtt(
   });
 }
 
-export function publishMqttWithAck(
+export async function publishMqttWithAck(
   topic: string,
   payload: string,
   ackTopic: string,
@@ -736,9 +761,9 @@ export function publishMqttWithAck(
   timeoutMs = 12000,
   options: Record<string, unknown> = {},
 ) {
-  const currentClient = connectOnce();
+  const currentClient = await connectOnce();
   if (!currentClient) {
-    return Promise.reject(new Error('MQTT client belum tersedia'));
+    throw new Error('MQTT client belum tersedia');
   }
 
   console.debug('[MQTT] publishWithAck', { topic, payload, ackTopic, options });
@@ -825,8 +850,8 @@ export function syncLocalControlState(action: string, duration?: number, data?: 
  * This is called automatically every 3 hours (or when value changes)
  * from App.tsx so it works without opening Settings page.
  */
-export function publishRainChance(rainChance: number) {
-  const currentClient = connectOnce();
+export async function publishRainChance(rainChance: number) {
+  const currentClient = await connectOnce();
   if (!currentClient) return Promise.resolve(false);
 
   const payload = JSON.stringify({
@@ -852,8 +877,8 @@ export function publishRainChance(rainChance: number) {
   });
 }
 
-export function announceWebPresence(status: 'online' | 'offline' = 'online') {
-  const currentClient = connectOnce();
+export async function announceWebPresence(status: 'online' | 'offline' = 'online') {
+  const currentClient = await connectOnce();
   if (!currentClient) return Promise.resolve(false);
 
   const payload = JSON.stringify({
@@ -879,5 +904,3 @@ export function announceWebPresence(status: 'online' | 'offline' = 'online') {
     );
   });
 }
-
-export default getMqttClient();

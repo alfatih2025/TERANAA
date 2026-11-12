@@ -4,7 +4,7 @@ import { Settings as SettingsIcon, User, Sprout, Wifi, CalendarDays, SlidersHori
 import { useSettings, Settings as SettingsType } from '../hooks/useSettings';
 import { useControl } from '../hooks/useControl';
 import { useWeather } from '../hooks/useWeather';
-import { useAuth } from '../hooks/useAuth';
+import { useAuth } from '../hooks/useAuthContext';
 import { getPhaseDefaults, getPlantPhaseProfile, formatRange } from '../lib/plantPhase';
 import { recordActivity } from '../lib/activityLog';
 

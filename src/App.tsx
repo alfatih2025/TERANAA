@@ -1,31 +1,46 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { lazy, Suspense, useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Sidebar, type PageId } from './components/Sidebar';
 import { Header } from './components/Header';
-import { Dashboard } from './pages/Dashboard';
-import { Monitoring } from './pages/Monitoring';
-import { ChatPage } from './pages/ChatPage';
-import { ControlPage } from './pages/ControlPage';
-import { WeatherPage } from './pages/WeatherPage';
-import { LogsPage } from './pages/LogsPage';
-import { SettingsPage } from './pages/SettingsPage';
-import { AiRouterPage } from './pages/AiRouterPage';
-import { AboutPage } from './pages/AboutPage';
+const Dashboard = lazy(() => import('./pages/Dashboard').then(({ Dashboard }) => ({ default: Dashboard })));
+const Monitoring = lazy(() => import('./pages/Monitoring').then(({ Monitoring }) => ({ default: Monitoring })));
+const ChatPage = lazy(() => import('./pages/ChatPage').then(({ ChatPage }) => ({ default: ChatPage })));
+const ControlPage = lazy(() => import('./pages/ControlPage').then(({ ControlPage }) => ({ default: ControlPage })));
+const WeatherPage = lazy(() => import('./pages/WeatherPage').then(({ WeatherPage }) => ({ default: WeatherPage })));
+const LogsPage = lazy(() => import('./pages/LogsPage').then(({ LogsPage }) => ({ default: LogsPage })));
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then(({ SettingsPage }) => ({ default: SettingsPage })));
+const AiRouterPage = lazy(() => import('./pages/AiRouterPage').then(({ AiRouterPage }) => ({ default: AiRouterPage })));
+const AboutPage = lazy(() => import('./pages/AboutPage').then(({ AboutPage }) => ({ default: AboutPage })));
 import { useMultiNodeSensorData } from './hooks/useMultiNodeSensorData';
-import { useDeviceStatus } from './hooks/useDeviceStatus';
-
 
 import { useWeather } from './hooks/useWeather';
 import { useSettings } from './hooks/useSettings';
 import { useAlerts } from './hooks/useAlerts';
 import { useMqttStatus } from './hooks/useMqttStatus';
 import { getPlantHealthSummary } from './lib/plantPhase';
-import { getSensorHistorySnapshot, publishRainChance } from './services/mqtt';
 import { recordActivity } from './lib/activityLog';
-import { LoginPage } from './pages/LoginPage';
-import { useAuth } from './hooks/useAuth';
+const LoginPage = lazy(() => import('./pages/LoginPage').then(({ LoginPage }) => ({ default: LoginPage })));
+import { useAuth } from './hooks/useAuthContext';
 
-import './index.css';
+function PageLoadingFallback() {
+  return (
+    <div className="space-y-6 p-1" aria-busy="true">
+      <div className="skeleton-shimmer h-8 w-48 rounded-lg" aria-hidden="true" />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-hidden="true">
+        {Array.from({ length: 3 }, (_, index) => (
+          <div key={index} className="glass-card space-y-4 p-5">
+            <div className="skeleton-shimmer h-4 w-24 rounded-md" />
+            <div className="skeleton-shimmer h-8 w-32 rounded-lg" />
+            <div className="skeleton-shimmer h-3 w-20 rounded-md" />
+          </div>
+        ))}
+      </div>
+      <p className="sr-only" role="status">Memuat halaman...</p>
+    </div>
+  );
+}
+
+const RAIN_PUBLISH_INTERVAL_MS = 3 * 60 * 60 * 1000;
 
 function resolvePageFromPath(pathname: string) {
   const normalized = pathname.replace(/^\/+|\/+$/g, '').toLowerCase();
@@ -52,7 +67,7 @@ function App() {
     if (typeof window === 'undefined') return 'dashboard';
     return resolvePageFromPath(window.location.pathname) as PageId;
   });
-  const { status: deviceStatus } = useDeviceStatus(5000);
+  const activePage = currentUser && currentPage === 'login' ? 'dashboard' : currentPage;
 
   const { settings, loading: settingsLoading, updateSettings } = useSettings();
   const { data: weatherData } = useWeather(settingsLoading ? null : settings?.location);
@@ -62,24 +77,34 @@ function App() {
   const lastAlertSignatureRef = useRef<string>('');
 
   useEffect(() => {
+    import('./services/mqtt')
+      .then(({ getMqttClient }) => getMqttClient())
+      .catch((error: unknown) => {
+        console.error('Gagal memulai koneksi MQTT:', error);
+      });
+  }, []);
+
+  useEffect(() => {
     const pageName =
-      currentPage === 'dashboard'
+      activePage === 'dashboard'
         ? 'Dashboard'
-        : currentPage === 'monitoring'
+        : activePage === 'monitoring'
           ? 'Monitoring'
-          : currentPage === 'chat'
+          : activePage === 'chat'
             ? 'AI Chat'
-            : currentPage === 'control'
+            : activePage === 'control'
               ? 'Control'
-              : currentPage === 'weather'
+              : activePage === 'weather'
                 ? 'Cuaca'
-                : currentPage === 'logs'
+                : activePage === 'logs'
                   ? 'Log & Analitik'
-                  : currentPage === 'settings'
+                  : activePage === 'settings'
                     ? 'Setting'
-                    : currentPage === 'airouter'
+                    : activePage === 'airouter'
                       ? 'AI Config'
-                      : 'About';
+                      : activePage === 'login'
+                        ? 'Login'
+                        : 'About';
 
     recordActivity({
       source: 'navigation',
@@ -87,26 +112,19 @@ function App() {
       title: `Membuka halaman ${pageName}`,
       message: `Membuka halaman ${pageName}`,
       details: {
-        page: currentPage,
+        page: activePage,
         title: pageName,
       },
     });
-  }, [currentPage]);
-
-  // Otomatis pindah ke dashboard jika sudah login tapi masih di halaman login
-  useEffect(() => {
-    if (currentUser && currentPage === 'login') {
-      setCurrentPage('dashboard');
-    }
-  }, [currentUser, currentPage]);
+  }, [activePage]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const path = currentPage === 'dashboard' ? '/' : `/${currentPage}`;
+    const path = activePage === 'dashboard' ? '/' : `/${activePage}`;
     if (window.location.pathname !== path) {
       window.history.replaceState(null, '', path);
     }
-  }, [currentPage]);
+  }, [activePage]);
   const { node1, node2, loading: sensorLoading } = useMultiNodeSensorData();
   
   const liveSensorData = useMemo(() => {
@@ -157,7 +175,6 @@ function App() {
       for (const item of alerts) {
         await createAlert(item.type, item.message, item.severity, {
           sendEmail: false,
-          recipientEmail: undefined as any,
           metadata: item.metadata,
         });
       }
@@ -188,13 +205,12 @@ function App() {
   // AUTO-PUBLISH RAIN CHANCE KE ESP32 (setiap 3 jam)
   // ============================================================
   const lastRainPublishRef = useRef<number>(0);
-  const RAIN_PUBLISH_INTERVAL_MS = 3 * 60 * 60 * 1000; // 3 jam
   const lastRainValueRef = useRef<number | null>(null);
+  const rainChance = weatherData?.current?.rain_chance;
 
   useEffect(() => {
-    if (!weatherData?.current?.rain_chance) return;
+    if (rainChance == null) return;
 
-    const rainChance = weatherData.current.rain_chance;
     const now = Date.now();
     const lastPublish = lastRainPublishRef.current;
     const lastValue = lastRainValueRef.current;
@@ -208,14 +224,16 @@ function App() {
     if (shouldPublish) {
       lastRainPublishRef.current = now;
       lastRainValueRef.current = rainChance;
-      publishRainChance(rainChance).catch(() => {});
+      import('./services/mqtt')
+        .then(({ publishRainChance }) => publishRainChance(rainChance))
+        .catch((error: unknown) => {
+          console.error('Gagal mengirim prakiraan hujan ke ESP32:', error);
+        });
     }
-  }, [weatherData?.current?.rain_chance]);
-
-  const mqttHistory = useMemo(() => getSensorHistorySnapshot(), [mqttStatus.lastMessageAt, mqttStatus.sensorSnapshot?.updatedAt]);
+  }, [rainChance]);
 
   const renderPage = () => {
-    switch (currentPage) {
+    switch (activePage) {
       case 'login':
         return <LoginPage />;
       case 'dashboard':
@@ -277,22 +295,42 @@ function App() {
 
   if (sensorLoading && !liveSensorData) {
     return (
-      <div className="min-h-screen">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="flex min-h-screen flex-col items-center justify-center text-center"
-        >
-          <motion.div
-            animate={{ rotate: 360 }}
-            transition={{ repeat: Infinity, duration: 2, ease: 'linear' }}
-            className="mb-6 h-20 w-20 rounded-full border-4 border-green-200 border-t-green-500"
-          />
-          <div>
-            <h2 className="mb-2 text-2xl font-bold text-green-800">TERANA</h2>
-            <p className="text-green-600 dark:text-green-400">Memuat data sensor...</p>
+      <div className="min-h-screen px-4 py-8 sm:px-6" aria-busy="true">
+        <div className="mx-auto max-w-6xl space-y-6">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">TeraNova</h2>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">Memuat data sensor...</p>
+            </div>
+            <div className="skeleton-shimmer h-9 w-28 rounded-xl" aria-hidden="true" />
           </div>
-        </motion.div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 3 }, (_, index) => (
+              <div key={index} className="glass-card space-y-5 p-5" aria-hidden="true">
+                <div className="flex items-center justify-between">
+                  <div className="skeleton-shimmer h-4 w-24 rounded-md" />
+                  <div className="skeleton-shimmer h-10 w-10 rounded-xl" />
+                </div>
+                <div className="skeleton-shimmer h-9 w-32 rounded-lg" />
+                <div className="skeleton-shimmer h-3 w-20 rounded-md" />
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2" aria-hidden="true">
+            <div className="glass-card space-y-5 p-5">
+              <div className="skeleton-shimmer h-5 w-36 rounded-md" />
+              <div className="skeleton-shimmer h-48 w-full rounded-xl" />
+            </div>
+            <div className="glass-card space-y-5 p-5">
+              <div className="skeleton-shimmer h-5 w-40 rounded-md" />
+              <div className="skeleton-shimmer h-48 w-full rounded-xl" />
+            </div>
+          </div>
+
+          <p className="sr-only" role="status">Memuat data sensor...</p>
+        </div>
       </div>
     );
   }
@@ -307,18 +345,20 @@ function App() {
         <Sidebar currentPage={currentPage} onPageChange={handlePageChange} />
 
         <div className="flex min-h-screen flex-1 flex-col min-w-0">
-          <Header mqttStatus={mqttStatus} currentPage={currentPage} health={health} />
+          <Header mqttStatus={mqttStatus} currentPage={activePage} health={health} />
 
           <main className="flex-1 overflow-auto overflow-x-hidden px-3 py-4 pt-16 sm:px-6 sm:py-6 sm:pt-6">
             <AnimatePresence mode="wait">
               <motion.div
-                key={currentPage}
+                key={activePage}
                 initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -12 }}
                 transition={{ duration: 0.2 }}
               >
-                {renderPage()}
+                <Suspense fallback={<PageLoadingFallback />}>
+                  {renderPage()}
+                </Suspense>
               </motion.div>
             </AnimatePresence>
           </main>

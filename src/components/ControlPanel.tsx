@@ -4,7 +4,7 @@ import { Timer, Droplets } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useControl } from '../hooks/useControl';
 import { SensorData } from '../hooks/useSensorData';
-import { useAuth } from '../hooks/useAuth';
+import { useAuth } from '../hooks/useAuthContext';
 import { AlertCircle } from 'lucide-react';
 
 interface ControlPanelProps {

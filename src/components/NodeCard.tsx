@@ -4,7 +4,7 @@ import { timeAgo } from '../lib/timeUtils';
 
 interface NodeCardProps {
   nodeName: string;
-  nodeId: 1 | 2;
+  nodeId: 1 | 2 | 3;
   data: NodeSensorData | null;
 }
 

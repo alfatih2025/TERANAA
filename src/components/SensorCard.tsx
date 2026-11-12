@@ -38,7 +38,7 @@ export function SensorCard({ title, value, unit, icon: Icon, status, trend }: Se
   return (
     <motion.div
       whileHover={{ y: -2, scale: 1.01 }}
-      className={`rounded-2xl border ${colors.border} ${colors.bg} p-3 shadow-sm transition-all hover:shadow-md sm:p-3 h-full min-h-[120px]`}
+      className={`sensor-card rounded-2xl border ${colors.border} ${colors.bg} p-3 shadow-sm transition-all hover:shadow-md sm:p-3 h-full min-h-[120px]`}
     >
       <div className="flex h-full flex-col justify-between gap-3">
         <div className="flex items-start justify-between gap-3">

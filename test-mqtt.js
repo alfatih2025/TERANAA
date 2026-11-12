@@ -1,9 +1,30 @@
 import mqtt from 'mqtt';
 
-const brokerUrl = 'mqtts://a4e9379a555f47669c90f4c69b75eeda.s1.eu.hivemq.cloud:8883';
+const configuredBroker = process.env.MQTT_SERVER?.trim();
+const username = process.env.MQTT_USERNAME?.trim();
+const password = process.env.MQTT_PASSWORD;
+if (!configuredBroker || !username || !password) {
+  throw new Error('Set MQTT_SERVER, MQTT_USERNAME, and MQTT_PASSWORD before running this test');
+}
+
+const defaultPort = Number(process.env.MQTT_PORT || 8883);
+const brokerUrl = /^wss?:\/\//i.test(configuredBroker)
+  ? configuredBroker.replace(/^wss?:\/\//i, 'mqtts://').replace(/:8884\/mqtt\/?$/i, ':8883')
+  : /^[a-z][a-z\d+.-]*:\/\//i.test(configuredBroker)
+    ? configuredBroker
+    : /:\d+$/.test(configuredBroker)
+      ? `mqtts://${configuredBroker}`
+      : `mqtts://${configuredBroker}:${defaultPort}`;
+
 const client = mqtt.connect(brokerUrl, {
-  username: 'NexaGrowv2',
-  password: 'NexaGrow12345'
+  username,
+  password
+});
+
+client.on('error', (err) => {
+  console.error('MQTT connection failed:', err.message);
+  client.end(true);
+  process.exitCode = 1;
 });
 
 client.on('connect', () => {

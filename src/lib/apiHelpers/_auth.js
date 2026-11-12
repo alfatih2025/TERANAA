@@ -9,7 +9,7 @@ function readEnv(...names) {
 }
 
 function getExpectedToken() {
-  return readEnv('API_AUTH_TOKEN', 'VITE_API_AUTH_TOKEN', 'NEXT_PUBLIC_API_AUTH_TOKEN');
+  return readEnv('API_AUTH_TOKEN');
 }
 
 function extractProvidedToken(req) {
@@ -34,7 +34,11 @@ export function authError(res, message = 'Unauthorized') {
 
 export function requireApiAuth(req, res, { allowAnonymous = false } = {}) {
   const expectedToken = getExpectedToken();
-  if (!expectedToken || allowAnonymous) return true;
+  if (allowAnonymous) return true;
+  if (!expectedToken) {
+    res.status(503).json({ error: 'API authentication is not configured' });
+    return false;
+  }
 
   const providedToken = extractProvidedToken(req);
   if (!providedToken || providedToken !== expectedToken) {

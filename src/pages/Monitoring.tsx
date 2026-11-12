@@ -100,6 +100,16 @@ export function Monitoring() {
           >
             Node 2
           </button>
+          <button
+            onClick={() => setActiveNode(3)}
+            className={`rounded-xl px-4 py-2 text-sm font-medium transition-all ${
+              activeNode === 3
+                ? 'bg-white text-amber-600 shadow-sm dark:bg-slate-950 dark:text-amber-400'
+                : 'text-slate-600 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
+            }`}
+          >
+            Node 3 (Gambut)
+          </button>
         </div>
       </div>
 
@@ -119,7 +129,10 @@ export function Monitoring() {
         <div className="border-b border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-900/50 p-4">
           <h3 className="font-semibold text-slate-900 dark:text-slate-100">Riwayat Data (Node {activeNode})</h3>
         </div>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" aria-busy={loading && history.length === 0}>
+          {loading && history.length === 0 && (
+            <span className="sr-only" role="status">Memuat riwayat data...</span>
+          )}
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-100 dark:bg-slate-900/50 text-slate-600 dark:text-slate-400">
               <tr>
@@ -131,11 +144,15 @@ export function Monitoring() {
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-800 bg-white light-card dark:bg-slate-950/50">
               {loading && history.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="px-6 py-8 text-center text-slate-600 dark:text-slate-300">
-                    Memuat data...
-                  </td>
-                </tr>
+                Array.from({ length: 5 }, (_, row) => (
+                  <tr key={row} aria-hidden="true">
+                    {[0, 1, 2, 3].map((cell) => (
+                      <td key={cell} className="px-3 py-3 sm:px-6 sm:py-4">
+                        <span className={`skeleton-shimmer block h-4 rounded-md ${cell === 0 ? 'w-32' : 'w-16'}`} />
+                      </td>
+                    ))}
+                  </tr>
+                ))
               ) : history.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="px-6 py-8 text-center text-slate-600 dark:text-slate-300">

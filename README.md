@@ -646,7 +646,7 @@ lib_deps =
     bblanchon/ArduinoJson@^7.2.2
 ```
 
-> **Catatan**: Kredensial diambil dari environment variables sistem. Jika tidak diset, fallback ke nilai di `secret.h`.
+> **Catatan**: Gunakan kredensial lokal yang tidak di-commit. Jangan mengandalkan nilai fallback dalam source control; kredensial yang pernah terekspos harus dirotasi.
 
 ### 9.2 Secret (`include/secret.h`)
 
@@ -675,12 +675,25 @@ lib_deps =
 | `MQTT_PORT` | Port MQTT (8883) |
 | `MQTT_USERNAME` | Username MQTT |
 | `MQTT_PASSWORD` | Password MQTT |
+| `MQTT_SERVER` | Broker MQTT untuk proses server, sebaiknya URL `mqtts://` lengkap atau hostname |
+| `MQTT_PORT` | Port MQTT server (default `8883`) |
+| `MQTT_HOST` | Host broker untuk konfigurasi backend PHP |
+| `LARAVEL_API_URL` | URL endpoint Laravel untuk forwarding data sensor |
+| `LARAVEL_API_KEY` | Kunci server-only untuk endpoint Laravel |
+| `SENSOR_API_KEY` | Kunci server-only untuk endpoint POST sensor |
+| `API_AUTH_TOKEN` | Token autentikasi API sisi server |
 | `VITE_SUPABASE_URL` | URL Supabase project |
 | `VITE_SUPABASE_ANON_KEY` | Supabase anon/public key untuk client-side access |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key untuk backend/API writes |
-| `VITE_API_AUTH_TOKEN` | Token internal untuk API route authentication |
+| `VITE_BROKER_URL` | URL WebSocket broker untuk koneksi langsung dari browser |
+| `VITE_MQTT_USERNAME` | Kredensial browser MQTT; nilainya akan masuk ke bundle publik |
+| `VITE_MQTT_PASSWORD` | Kredensial browser MQTT; nilainya akan masuk ke bundle publik |
+| `VITE_API_AUTH_TOKEN` | Token yang dikirim browser; nilainya publik dan bukan batas keamanan |
 
 > Catatan: `SUPABASE_SERVICE_ROLE_KEY` harus disimpan sebagai secret di environment dan hanya dipakai oleh server/API. Jangan letakkan di file JavaScript/klien yang bisa diakses browser.
+
+> Semua variabel `VITE_*` tertanam dalam bundle browser dan dapat dibaca pengguna. Jangan masukkan kredensial server, API key privat, atau token yang diandalkan sebagai rahasia ke variabel tersebut. API browser harus dilindungi dengan autentikasi pengguna yang tervalidasi di server.
+> Pada mode token bersama yang masih digunakan route saat ini, `VITE_API_AUTH_TOKEN` harus cocok dengan `API_AUTH_TOKEN`; karena versi VITE bersifat publik, ini bukan pengganti autentikasi pengguna yang aman.
 
 ### 9.4 NVS Preferences (Runtime)
 

@@ -1,22 +1,38 @@
 import mqtt from 'mqtt';
 import supabase from '../lib/apiHelpers/_supabase.js';
 
-// Konfigurasi API Laravel Railway
-const LARAVEL_API_URL = 'https://backendnexa-production-adce.up.railway.app/api/sensor-data';
-const LARAVEL_API_KEY = 'NXG_2026_x7f83K2Lm91';
+const LARAVEL_API_URL = process.env.LARAVEL_API_URL?.trim();
+const LARAVEL_API_KEY = process.env.LARAVEL_API_KEY?.trim();
 
 export function startMqttWorker() {
-  const brokerUrl = process.env.VITE_BROKER_URL || 'wss://a4e9379a555f47669c90f4c69b75eeda.s1.eu.hivemq.cloud:8884/mqtt';
-  // Use mqtts port 8883 for NodeJS client instead of wss
-  const mqttUrl = brokerUrl.replace('wss://', 'mqtts://').replace(':8884/mqtt', ':8883');
+  const configuredBroker = process.env.MQTT_SERVER?.trim();
+  const username = process.env.MQTT_USERNAME?.trim();
+  const password = process.env.MQTT_PASSWORD;
+  if (!configuredBroker || !username || !password) {
+    console.error('[MQTT Worker] MQTT_SERVER, MQTT_USERNAME, and MQTT_PASSWORD are required');
+    return;
+  }
+
+  const defaultPort = Number(process.env.MQTT_PORT || 8883);
+  const mqttUrl = /^wss?:\/\//i.test(configuredBroker)
+    ? configuredBroker.replace(/^wss?:\/\//i, 'mqtts://').replace(/:8884\/mqtt\/?$/i, ':8883')
+    : /^[a-z][a-z\d+.-]*:\/\//i.test(configuredBroker)
+      ? configuredBroker
+      : /:\d+$/.test(configuredBroker)
+        ? `mqtts://${configuredBroker}`
+        : `mqtts://${configuredBroker}:${defaultPort}`;
   
   console.log('[MQTT Worker] Connecting to MQTT broker...');
   const client = mqtt.connect(mqttUrl, {
-    username: process.env.VITE_MQTT_USERNAME || 'NexaGrowv2',
-    password: process.env.VITE_MQTT_PASSWORD || 'NexaGrow12345',
+    username,
+    password,
     connectTimeout: 5000,
     reconnectPeriod: 5000,
   });
+
+  if (!LARAVEL_API_URL || !LARAVEL_API_KEY) {
+    console.warn('[MQTT Worker] Laravel forwarding is disabled; server-only URL/key are not configured');
+  }
 
   client.on('connect', () => {
     console.log('[MQTT Worker] Connected to MQTT broker. Subscribing to sensor topics...');
@@ -56,7 +72,9 @@ export function startMqttWorker() {
 
       // 2. TERUSKAN KE LARAVEL RAILWAY (Server-to-Server)
       // Tambahkan ke antrean untuk dikirim secara batch
-      laravelBuffer.push(sensorPayload);
+      if (LARAVEL_API_URL && LARAVEL_API_KEY) {
+        laravelBuffer.push(sensorPayload);
+      }
 
     } catch (e) {
       console.error('[MQTT Worker] Error processing message:', e.message);

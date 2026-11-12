@@ -29,6 +29,13 @@
     "tailwindcss": "^4.2.1",
     "tsx": "^4.23.12"
   },
+  "overrides": {
+    "@grpc/grpc-js": "^1.13.6",
+    "brace-expansion@1.1.14": "^1.1.21",
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "^11.0.1"
+    }
+  },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@firebase/eslint-plugin-security-rules": "^0.0.2",

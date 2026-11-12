@@ -183,7 +183,7 @@ export function useControl() {
     setError(null);
 
     try {
-      const client = getMqttClient();
+      const client = await getMqttClient();
       if (!client) throw new Error('MQTT client belum tersedia');
 
       const mqttCommand = resolveControlCommand(action, duration, data);

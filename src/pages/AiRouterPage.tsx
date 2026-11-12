@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Network, Bot, Settings2, Sliders, CheckCircle2, ShieldAlert } from 'lucide-react';
 import { useSettings, Settings as SettingsType } from '../hooks/useSettings';
-import { useAuth } from '../hooks/useAuth';
+import { useAuth } from '../hooks/useAuthContext';
 import { recordActivity } from '../lib/activityLog';
 
 const PROVIDERS = [

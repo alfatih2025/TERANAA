@@ -1,4 +1,4 @@
-import { requireApiAuth, authError } from '../lib/apiHelpers/_auth.js';
+import { requireFirebaseAuth, authError } from '../lib/apiHelpers/_auth.js';
 import supabase from '../lib/apiHelpers/_supabase.js';
 
 const OPENROUTER_API_KEY =
@@ -176,7 +176,8 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(204).end();
 
-  if (!requireApiAuth(req, res)) return;
+  const authenticatedUser = await requireFirebaseAuth(req, res);
+  if (!authenticatedUser) return;
 
   try {
     if (req.method === 'GET') {
@@ -195,6 +196,7 @@ export default async function handler(req, res) {
         .select('*')
         .gte('created_at', startOfDay)
         .lt('created_at', startOfNextDay.toISOString())
+        .eq('user_id', authenticatedUser.uid)
         .order('created_at', { ascending: true })
         .limit(parseInt(limit, 10));
 
@@ -203,7 +205,8 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST') {
-      const { message, user_id = 'anonymous', yesterdayHistory = null } = req.body || {};
+      const { message, yesterdayHistory = null } = req.body || {};
+      const user_id = authenticatedUser.uid;
 
       const { data: latestSensor } = await supabase
         .from('sensor_data')
@@ -318,7 +321,7 @@ aiResponse = `Maaf, saya sedang kesulitan terhubung ke AI Online. ${error instan
       const assistantMetadata = buildChatMetadata(latestSensor, latestSettings || {}, 'assistant');
       const assistantMessage = await safeInsertChatMessage(
         {
-          user_id: 'assistant_001',
+          user_id: authenticatedUser.uid,
           role: 'assistant',
           content: aiResponse,
           metadata: assistantMetadata,
@@ -342,7 +345,8 @@ aiResponse = `Maaf, saya sedang kesulitan terhubung ke AI Online. ${error instan
         .from('chat_messages')
         .delete()
         .gte('created_at', start)
-        .lt('created_at', end);
+        .lt('created_at', end)
+        .eq('user_id', authenticatedUser.uid);
 
       if (error) throw error;
       return res.status(200).json({ success: true, date: start.slice(0, 10) });

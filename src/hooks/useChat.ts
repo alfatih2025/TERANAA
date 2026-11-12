@@ -1,4 +1,4 @@
-import { buildApiHeaders } from '../lib/apiAuth';
+import { buildFirebaseAuthHeaders } from '../lib/apiAuth';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { SensorSnapshotContext } from '../services/openrouter';
 import type { DailyHistory } from './useDailyHistory';
@@ -38,7 +38,7 @@ function createMessage(role: 'user' | 'assistant', content: string, images?: str
 }
 
 async function fetchApiMessages(): Promise<ChatMessage[]> {
-  const response = await fetch('/api/chat', { headers: buildApiHeaders() });
+  const response = await fetch('/api/chat', { headers: await buildFirebaseAuthHeaders() });
   if (!response.ok) {
     throw new Error(`Chat API tidak merespons (${response.status})`);
   }
@@ -98,14 +98,27 @@ export function useChat() {
       detail: 'Menghubungkan chatbot ke sistem...',
     });
     try {
-      const res = await fetch('/api/airouter', { headers: buildApiHeaders() });
+      const res = await fetch('/api/airouter', { headers: await buildFirebaseAuthHeaders() });
+      const status = await res.json().catch(() => null);
       if (res.ok) {
-        setConnectionStatus({ state: 'connected', label: 'AI Router Aktif', detail: 'Sistem siap.' });
+        setConnectionStatus({
+          state: 'connected',
+          label: status?.label || 'AI Router Aktif',
+          detail: status?.detail || 'Sistem siap.',
+        });
       } else {
-        setConnectionStatus({ state: 'error', label: 'AI Router Error', detail: 'Periksa API Keys' });
+        setConnectionStatus({
+          state: 'error',
+          label: status?.label || 'AI Router Error',
+          detail: status?.detail || status?.error || `AI Router gagal (${res.status})`,
+        });
       }
-    } catch {
-      setConnectionStatus({ state: 'error', label: 'AI Router Offline', detail: 'Gagal menghubungi server' });
+    } catch (error) {
+      setConnectionStatus({
+        state: 'error',
+        label: 'AI Router Offline',
+        detail: error instanceof Error ? error.message : 'Gagal menghubungi server',
+      });
     }
   }, []);
 
@@ -115,7 +128,7 @@ export function useChat() {
   const loadYesterdayHistory = useCallback(async () => {
     try {
       const response = await fetch('/api/chat-daily-history?target=yesterday', {
-        headers: buildApiHeaders(),
+        headers: await buildFirebaseAuthHeaders(),
       });
 
       if (response.ok) {
@@ -157,7 +170,7 @@ export function useChat() {
     try {
       const response = await fetch('/api/chat', {
         method: 'DELETE',
-        headers: buildApiHeaders({ 'Content-Type': 'application/json' }),
+        headers: await buildFirebaseAuthHeaders({ 'Content-Type': 'application/json' }),
       });
 
       const result = await response.json().catch(() => null);
@@ -221,11 +234,11 @@ export function useChat() {
       try {
         const response = await fetch('/api/airouter', {
           method: 'POST',
-          headers: buildApiHeaders({ 'Content-Type': 'application/json' }),
+          headers: await buildFirebaseAuthHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             message: displayMessage,
             images: images || [],
-            history: optimisticMessages.map(m => ({ role: m.role, content: m.content })),
+            history: messages.map(m => ({ role: m.role, content: m.content })),
             sensorContext: normalizeSensorContext(sensorContext),
             aiSettings: settings,
             yesterdayHistory: yesterdayHistory ? {

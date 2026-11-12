@@ -35,6 +35,7 @@ export function AiRouterPage() {
   const [formData, setFormData] = useState<Partial<SettingsType>>({});
   const [isDirty, setIsDirty] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     if (settings && !isDirty) {
@@ -59,9 +60,10 @@ export function AiRouterPage() {
   const handleSave = async () => {
     if (!isAdmin) return;
     setSaveStatus('saving');
+    setSaveError(null);
     
     try {
-      await updateSettings(formData);
+      await updateSettings(formData, { requireRemote: true });
       recordActivity({
         source: 'settings',
         type: 'ai_router_updated',
@@ -74,6 +76,7 @@ export function AiRouterPage() {
       setTimeout(() => setSaveStatus('idle'), 2500);
     } catch (err) {
       console.error(err);
+      setSaveError(err instanceof Error ? err.message : 'Gagal menyimpan konfigurasi AI.');
       setSaveStatus('idle');
     }
   };
@@ -112,6 +115,11 @@ export function AiRouterPage() {
           {saveStatus === 'saving' ? 'Menyimpan...' : saveStatus === 'saved' ? 'Tersimpan ✓' : 'Simpan Konfigurasi'}
         </button>
       </div>
+      {saveError && (
+        <p role="alert" className="-mt-4 text-sm text-red-600 dark:text-red-400">
+          Konfigurasi belum tersimpan ke server: {saveError}
+        </p>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm dark:bg-gray-900 dark:border-gray-800 cursor-pointer" onClick={() => updateField('ai_mode', 'default')}>

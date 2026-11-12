@@ -64,17 +64,34 @@ export function buildFormulaReference() {
 
 export function isArduinoFormulaRequest(message) {
   const normalized = String(message || '').toLowerCase();
-  return normalized.includes('rumus') || normalized.includes('formula') || normalized.includes('arduino');
+  return /\b(rumus|formula)\b/.test(normalized) && /\b(arduino|mikrokontroler|esp32)\b/.test(normalized);
 }
 
-function buildSystemPrompt(sensor) {
+function buildSystemPrompt(sensor, yesterdayHistory) {
   const sensorLines = sensor ? [
     formatLine('Device ID', sensor.device_id),
     formatLine('Fase Tanaman', sensor.plant_phase),
     formatLine('Suhu', sensor.temperature, ' °C'),
     formatLine('Kelembapan Udara', sensor.humidity, ' %'),
     formatLine('Kelembapan Tanah', sensor.soil_moisture, ' %'),
+    formatLine('Batas kelembapan tanah bawah', sensor.soil_threshold_low, ' %'),
+    formatLine('Batas kelembapan tanah kritis', sensor.soil_threshold_critical, ' %'),
+    formatLine('Batas kelembapan tanah atas', sensor.soil_threshold_high, ' %'),
+    formatLine('Batas suhu', sensor.temp_threshold_low, `–${sensor.temp_threshold_high ?? '-'} °C`),
+    formatLine('Batas kelembapan udara', sensor.humidity_threshold_low, `–${sensor.humidity_threshold_high ?? '-'} %`),
+    formatLine('Lokasi cuaca', sensor.weather_location),
+    formatLine('Kondisi cuaca', sensor.weather_condition),
+    formatLine('Suhu cuaca', sensor.weather_temperature, ' °C'),
+    formatLine('Peluang hujan', sensor.weather_rain_chance, ' %'),
+    formatLine('Prakiraan cuaca', typeof sensor.weather_forecast === 'string' ? sensor.weather_forecast.slice(0, 1200) : null),
   ].join('\n') : 'Data sensor belum tersedia.';
+  const yesterdayLines = yesterdayHistory && typeof yesterdayHistory === 'object'
+    ? [
+      `Ringkasan: ${String(yesterdayHistory.summary || '-').slice(0, 1000)}`,
+      `Insight: ${String(yesterdayHistory.insights || '-').slice(0, 1000)}`,
+      `Rekomendasi: ${String(yesterdayHistory.recommendations || '-').slice(0, 1000)}`,
+    ].join('\n')
+    : 'Riwayat kemarin belum tersedia.';
 
   return [
     'Kamu adalah AI Router dan Analis Cerdas untuk TeraNova.',
@@ -102,6 +119,9 @@ function buildSystemPrompt(sensor) {
     '',
     'DATA SENSOR TERKINI:',
     sensorLines,
+    '',
+    'RINGKASAN HARI SEBELUMNYA:',
+    yesterdayLines,
   ].join('\n');
 }
 
@@ -156,12 +176,16 @@ async function callProvider(provider, model, messages, temperature, maxTokens, o
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error?.message || 'Gemini error');
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (typeof content !== 'string' || !content.trim()) {
+      throw new Error(data.candidates?.[0]?.finishReason || 'Gemini mengembalikan respons kosong');
+    }
+    return content;
   }
   
   if (provider === 'openrouter') {
     endpoint = 'https://openrouter.ai/api/v1/chat/completions';
-    headers['HTTP-Referer'] = origin;
+    if (typeof origin === 'string' && origin.trim()) headers['HTTP-Referer'] = origin;
     headers['X-Title'] = 'TeraNova';
   } else if (provider === 'groq') {
     endpoint = 'https://api.groq.com/openai/v1/chat/completions';
@@ -199,7 +223,11 @@ async function callProvider(provider, model, messages, temperature, maxTokens, o
 
   const data = await response.json();
   if (!response.ok) throw new Error(data.error?.message || `${provider} API error`);
-  return data.choices?.[0]?.message?.content || '';
+  const content = data.choices?.[0]?.message?.content;
+  if (typeof content !== 'string' || !content.trim()) {
+    throw new Error(`${provider} mengembalikan respons kosong`);
+  }
+  return content;
 }
 
 function normalizeAiModel(provider, model) {
@@ -220,8 +248,16 @@ export async function getAiRouterStatus(origin) {
   return { ok: true, state: 'connected', label: 'AI Router Online', detail: 'Sistem siap.' };
 }
 
-export async function sendAiRouterMessage({ message, images = [], history = [], sensorContext = null, aiSettings = null, origin }) {
-  const settings = aiSettings || {
+export async function sendAiRouterMessage({
+  message,
+  images = [],
+  history = [],
+  sensorContext = null,
+  aiSettings = null,
+  yesterdayHistory = null,
+  origin,
+}) {
+  const settings = {
     ai_primary_provider: 'gemini',
     ai_primary_model: 'gemini-3.5-flash-lite',
     ai_fallback_1_provider: 'openrouter',
@@ -230,6 +266,7 @@ export async function sendAiRouterMessage({ message, images = [], history = [], 
     ai_fallback_2_model: 'openai/gpt-oss-120b',
     ai_temperature: 0.4,
     ai_max_tokens: 600,
+    ...(aiSettings && typeof aiSettings === 'object' ? aiSettings : {}),
   };
 
   const hasImages = Array.isArray(images) && images.length > 0;
@@ -238,10 +275,12 @@ export async function sendAiRouterMessage({ message, images = [], history = [], 
     : '';
 
   const messages = [
-    { role: 'system', content: buildSystemPrompt(sensorContext) + imagePromptNote },
-    ...history.slice(-8).map((item) => ({
+    { role: 'system', content: buildSystemPrompt(sensorContext, yesterdayHistory) + imagePromptNote },
+    ...(Array.isArray(history) ? history : []).filter((item) => (
+      item && (item.role === 'user' || item.role === 'assistant') && typeof item.content === 'string'
+    )).slice(-8).map((item) => ({
       role: item.role === 'assistant' ? 'assistant' : 'user',
-      content: item.content,
+      content: item.content.slice(0, 8000),
     })),
     { role: 'user', content: message },
   ];
@@ -284,7 +323,7 @@ export async function sendAiRouterMessage({ message, images = [], history = [], 
   }
 
   // Parse JSON block
-  let jsonMatch = successContent.match(/```json\n([\s\S]*?)\n```/);
+  const jsonMatch = successContent.match(/```json\s*([\s\S]*?)\s*```/i);
   let analysisData = null;
   let chatContent = successContent;
 

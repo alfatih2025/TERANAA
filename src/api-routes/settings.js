@@ -1,5 +1,5 @@
 import supabase from '../lib/apiHelpers/_supabase.js';
-import { requireApiAuth } from '../lib/apiHelpers/_auth.js';
+import { requireFirebaseAdmin } from '../lib/apiHelpers/_auth.js';
 
 const DEFAULT_LOCATION_CODE = '33.74.07.1010';
 const CURRENT_GEMINI_MODEL = 'gemini-3.5-flash-lite';
@@ -204,7 +204,8 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'PUT' || req.method === 'POST') {
-      if (!requireApiAuth(req, res)) return;
+      const user = await requireFirebaseAdmin(req, res);
+      if (!user) return;
 
       const updates = req.body || {};
       const payload = normalizeSettings(updates);

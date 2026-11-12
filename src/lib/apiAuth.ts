@@ -1,4 +1,15 @@
+import { auth } from './firebase';
+
 const API_AUTH_TOKEN = (import.meta.env.VITE_API_AUTH_TOKEN as string | undefined)?.trim() ?? '';
+
+export async function buildFirebaseAuthHeaders(extra: HeadersInit = {}): Promise<HeadersInit> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Silakan masuk untuk menggunakan AI.');
+
+  const headers = new Headers(extra);
+  headers.set('Authorization', `Bearer ${await user.getIdToken()}`);
+  return headers;
+}
 
 export function hasApiAuthToken() {
   return API_AUTH_TOKEN.length > 0;

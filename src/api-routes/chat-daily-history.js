@@ -1,4 +1,4 @@
-import { requireApiAuth, authError } from '../lib/apiHelpers/_auth.js';
+import { requireFirebaseAuth, authError } from '../lib/apiHelpers/_auth.js';
 import {
   getDailyHistory,
   getYesterdayHistory,
@@ -16,7 +16,8 @@ export default async function handler(req, res) {
 
   if (req.method === 'OPTIONS') return res.status(204).end();
 
-  if (!requireApiAuth(req, res)) return;
+  const authenticatedUser = await requireFirebaseAuth(req, res);
+  if (!authenticatedUser) return;
 
   try {
     // GET /api/chat-daily-history

@@ -1,4 +1,4 @@
-import { requireApiAuth } from '../lib/apiHelpers/_auth.js';
+import { requireFirebaseAuth } from '../lib/apiHelpers/_auth.js';
 import { getAiRouterStatus, sendAiRouterMessage, isArduinoFormulaRequest, buildFormulaReference } from '../lib/apiHelpers/_airouter.js';
 import supabase from '../lib/apiHelpers/_supabase.js';
 
@@ -8,7 +8,8 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key');
 
   if (req.method === 'OPTIONS') return res.status(204).end();
-  if (!requireApiAuth(req, res)) return;
+  const user = await requireFirebaseAuth(req, res);
+  if (!user) return;
 
   if (req.method === 'GET') {
     const status = await getAiRouterStatus(req.headers.origin);
@@ -20,7 +21,14 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { message, images = [], history = [], sensorContext = null, aiSettings = null } = req.body || {};
+    const {
+      message,
+      images = [],
+      history = [],
+      sensorContext = null,
+      aiSettings = null,
+      yesterdayHistory = null,
+    } = req.body || {};
     if (!message || typeof message !== 'string') {
       return res.status(400).json({ error: 'Message is required' });
     }
@@ -45,10 +53,11 @@ export default async function handler(req, res) {
       history,
       sensorContext,
       aiSettings,
+      yesterdayHistory,
       origin: req.headers.origin,
     });
 
-    const user_id = req.body?.user_id || 'user_001';
+    const user_id = user.uid;
 
     // Resilient helper to insert chat message handling varying table schemas
     const insertChatRecord = async (payload, fallbackSnapshots = {}) => {
@@ -104,7 +113,7 @@ export default async function handler(req, res) {
     // Save assistant message (non-blocking for UI response)
     await insertChatRecord(
       {
-        user_id: 'assistant_001',
+        user_id: user.uid,
         role: 'assistant',
         content: result.content || '',
         metadata: { role: 'assistant', analysis: result.analysis },

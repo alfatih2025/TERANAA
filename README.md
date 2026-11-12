@@ -682,6 +682,11 @@ lib_deps =
 | `LARAVEL_API_KEY` | Kunci server-only untuk endpoint Laravel |
 | `SENSOR_API_KEY` | Kunci server-only untuk endpoint POST sensor |
 | `API_AUTH_TOKEN` | Token autentikasi API sisi server |
+| `FIREBASE_PROJECT_ID` | ID proyek Firebase untuk validasi issuer dan audience token login |
+| `FIREBASE_ADMIN_EMAILS` | Daftar email admin server yang dipisahkan koma, untuk menyimpan konfigurasi AI |
+| `GEMINI_API_KEY` | Kunci server-only untuk provider Gemini |
+| `OPENROUTER_API_KEY` | Kunci server-only untuk provider OpenRouter |
+| `GROQ_API_KEY` | Kunci server-only untuk provider Groq |
 | `VITE_SUPABASE_URL` | URL Supabase project |
 | `VITE_SUPABASE_ANON_KEY` | Supabase anon/public key untuk client-side access |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key untuk backend/API writes |

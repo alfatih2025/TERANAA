@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { buildApiHeaders } from '../lib/apiAuth';
+import { buildApiHeaders, buildFirebaseAuthHeaders } from '../lib/apiAuth';
 import { getPhaseDefaults, normalizePlantPhase, type PlantPhase } from '../lib/plantPhase';
 import { DEFAULT_WEATHER_LOCATION_CODE, normalizeWeatherLocationCode } from '../lib/weatherLocations';
 
@@ -228,7 +228,7 @@ export function useSettings() {
   }, [syncLocalSettings]);
 
   const updateSettings = useCallback(
-    async (updates: Partial<Settings>) => {
+    async (updates: Partial<Settings>, options: { requireRemote?: boolean } = {}) => {
       setLoading(true);
       const previous = settings ? normalizeSettings(settings) : DEFAULT_SETTINGS;
       const payload = normalizeSettings({ ...previous, ...updates });
@@ -240,15 +240,17 @@ export function useSettings() {
       try {
         const res = await fetch('/api/settings', {
           method: 'PUT',
-          headers: buildApiHeaders({
+          headers: await buildFirebaseAuthHeaders({
             'Content-Type': 'application/json',
           }),
           body: JSON.stringify(payload),
         });
 
         if (!res.ok) {
-          const message = `Failed to update settings (${res.status})`;
+          const result = await res.json().catch(() => null);
+          const message = result?.error || `Gagal menyimpan pengaturan (${res.status})`;
           setError(message);
+          if (options.requireRemote) throw new Error(message);
           return payload;
         }
 
@@ -261,6 +263,7 @@ export function useSettings() {
         // Ini penting karena MQTT ke ESP32 tetap harus tetap bisa dikirim meski API gagal.
         const message = err instanceof Error ? err.message : 'Unknown error';
         setError(message);
+        if (options.requireRemote) throw err;
         return payload;
       } finally {
         setLoading(false);

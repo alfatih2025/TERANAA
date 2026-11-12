@@ -1,4 +1,4 @@
-import { buildFirebaseAuthHeaders } from '../lib/apiAuth';
+import { buildFirebaseAuthHeaders, buildOptionalFirebaseAuthHeaders } from '../lib/apiAuth';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { SensorSnapshotContext } from '../services/openrouter';
 import type { DailyHistory } from './useDailyHistory';
@@ -98,7 +98,7 @@ export function useChat() {
       detail: 'Menghubungkan chatbot ke sistem...',
     });
     try {
-      const res = await fetch('/api/airouter', { headers: await buildFirebaseAuthHeaders() });
+      const res = await fetch('/api/airouter', { headers: await buildOptionalFirebaseAuthHeaders() });
       const status = await res.json().catch(() => null);
       if (res.ok) {
         setConnectionStatus({
@@ -170,7 +170,7 @@ export function useChat() {
     try {
       const response = await fetch('/api/chat', {
         method: 'DELETE',
-        headers: await buildFirebaseAuthHeaders({ 'Content-Type': 'application/json' }),
+        headers: await buildOptionalFirebaseAuthHeaders({ 'Content-Type': 'application/json' }),
       });
 
       const result = await response.json().catch(() => null);

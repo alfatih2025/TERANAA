@@ -11,6 +11,13 @@ export async function buildFirebaseAuthHeaders(extra: HeadersInit = {}): Promise
   return headers;
 }
 
+export async function buildOptionalFirebaseAuthHeaders(extra: HeadersInit = {}): Promise<HeadersInit> {
+  const headers = new Headers(extra);
+  const user = auth.currentUser;
+  if (user) headers.set('Authorization', `Bearer ${await user.getIdToken()}`);
+  return headers;
+}
+
 export function hasApiAuthToken() {
   return API_AUTH_TOKEN.length > 0;
 }

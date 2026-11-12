@@ -116,16 +116,13 @@ export function requireApiAuth(req, res, { allowAnonymous = false } = {}) {
   return true;
 }
 
-export async function requireFirebaseAuth(req, res) {
+export async function getOptionalFirebaseAuth(req, res) {
   const authHeader = req?.headers?.authorization || req?.headers?.Authorization || '';
   const idToken = typeof authHeader === 'string' && authHeader.toLowerCase().startsWith('bearer ')
     ? authHeader.slice(7).trim()
     : '';
 
-  if (!idToken) {
-    authError(res);
-    return null;
-  }
+  if (!idToken) return null;
 
   try {
     const claims = await verifyFirebaseIdToken(idToken);
@@ -140,6 +137,20 @@ export async function requireFirebaseAuth(req, res) {
     res.status(503).json({ error: 'Tidak dapat memverifikasi sesi login saat ini. Coba lagi.' });
     return null;
   }
+}
+
+export async function requireFirebaseAuth(req, res) {
+  const authHeader = req?.headers?.authorization || req?.headers?.Authorization || '';
+  const idToken = typeof authHeader === 'string' && authHeader.toLowerCase().startsWith('bearer ')
+    ? authHeader.slice(7).trim()
+    : '';
+
+  if (!idToken) {
+    authError(res);
+    return null;
+  }
+
+  return getOptionalFirebaseAuth(req, res);
 }
 
 export async function requireFirebaseAdmin(req, res) {

@@ -1,4 +1,4 @@
-import { requireFirebaseAuth } from '../lib/apiHelpers/_auth.js';
+import { getOptionalFirebaseAuth } from '../lib/apiHelpers/_auth.js';
 import { getAiRouterStatus, sendAiRouterMessage, isArduinoFormulaRequest, buildFormulaReference } from '../lib/apiHelpers/_airouter.js';
 import supabase from '../lib/apiHelpers/_supabase.js';
 
@@ -8,8 +8,8 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key');
 
   if (req.method === 'OPTIONS') return res.status(204).end();
-  const user = await requireFirebaseAuth(req, res);
-  if (!user) return;
+  const user = await getOptionalFirebaseAuth(req, res);
+  if (res.headersSent) return;
 
   if (req.method === 'GET') {
     const status = await getAiRouterStatus(req.headers.origin);
@@ -57,8 +57,6 @@ export default async function handler(req, res) {
       origin: req.headers.origin,
     });
 
-    const user_id = user.uid;
-
     // Resilient helper to insert chat message handling varying table schemas
     const insertChatRecord = async (payload, fallbackSnapshots = {}) => {
       try {
@@ -99,27 +97,28 @@ export default async function handler(req, res) {
       }
     };
 
-    // Save user message (non-blocking for UI response)
-    await insertChatRecord(
-      {
-        user_id,
-        role: 'user',
-        content: message,
-        metadata: { role: 'user', sensor_snapshot: sensorContext, settings_snapshot: aiSettings },
-      },
-      { sensor_snapshot: sensorContext, settings_snapshot: aiSettings }
-    );
+    if (user) {
+      // Save user and assistant messages only for authenticated accounts.
+      await insertChatRecord(
+        {
+          user_id: user.uid,
+          role: 'user',
+          content: message,
+          metadata: { role: 'user', sensor_snapshot: sensorContext, settings_snapshot: aiSettings },
+        },
+        { sensor_snapshot: sensorContext, settings_snapshot: aiSettings }
+      );
 
-    // Save assistant message (non-blocking for UI response)
-    await insertChatRecord(
-      {
-        user_id: user.uid,
-        role: 'assistant',
-        content: result.content || '',
-        metadata: { role: 'assistant', analysis: result.analysis },
-      },
-      { sensor_snapshot: sensorContext, settings_snapshot: aiSettings }
-    );
+      await insertChatRecord(
+        {
+          user_id: user.uid,
+          role: 'assistant',
+          content: result.content || '',
+          metadata: { role: 'assistant', analysis: result.analysis },
+        },
+        { sensor_snapshot: sensorContext, settings_snapshot: aiSettings }
+      );
+    }
 
     return res.status(200).json(result);
   } catch (error) {

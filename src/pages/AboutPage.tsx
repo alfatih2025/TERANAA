@@ -32,9 +32,9 @@ export function AboutPage() {
             <Info size={22} />
           </div>
           <div>
-            <h1 className="text-2xl font-bold">About / Tentang Web IoT TERANA</h1>
+            <h1 className="text-2xl font-bold">About / Tentang TeraNova</h1>
             <p className="text-green-100 mt-2 max-w-3xl">
-              TERANA adalah platform monitoring tanaman berbasis IoT yang membantu petani menjaga kondisi pertumbuhan lebih konsisten melalui
+              TeraNova adalah platform monitoring tanaman berbasis IoT yang membantu petani menjaga kondisi pertumbuhan lebih konsisten melalui
               data sensor, kontrol perangkat, dan dukungan analitik.
             </p>
           </div>
@@ -43,11 +43,10 @@ export function AboutPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="rounded-2xl bg-white/70 backdrop-blur border border-green-100 p-6 shadow-sm">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Arti “TERANA”</h2>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Mengenal TeraNova</h2>
           <p className="text-sm text-gray-700 leading-relaxed mt-3 dark:text-gray-300">
-            <span className="font-semibold">Nexa</span> menggambarkan konektivitas dan kecerdasan berbasis data,
-            sedangkan <span className="font-semibold">Grow</span> merepresentasikan tujuan utama: membantu tanaman tumbuh optimal.
-            TERANA menjadi “otak” digital untuk pertumbuhan tanaman yang terukur dan lebih efisien.
+            TeraNova menghadirkan cara baru untuk merawat tanaman melalui pemantauan IoT, analitik data, dan dukungan AI.
+            Satu dashboard membantu pengguna memahami kondisi tanaman dan mengambil keputusan perawatan dengan lebih percaya diri.
           </p>
 
           <div className="mt-5 flex flex-wrap gap-2">
@@ -66,7 +65,7 @@ export function AboutPage() {
         <div className="rounded-2xl bg-white/70 backdrop-blur border border-green-100 p-6 shadow-sm">
           <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Fitur Utama</h2>
           <p className="text-sm text-gray-700 leading-relaxed mt-3 dark:text-gray-300">
-            Web TERANA dirancang untuk memberi visibilitas real-time, tindakan cepat, dan panduan berbasis AI agar keputusan perawatan
+            TeraNova dirancang untuk memberi visibilitas real-time, tindakan cepat, dan panduan berbasis AI agar keputusan perawatan
             tanaman lebih tepat.
           </p>
         </div>
@@ -125,7 +124,7 @@ export function AboutPage() {
           icon={BookOpen}
         />
         <Feature
-          title="AI Chat (TERANA AI)"
+          title="AI Chat (TeraNova AI)"
           description="Gunakan AI untuk mendapatkan saran perawatan dan penjelasan berdasarkan data sensor dan konteks tanaman."
           icon={Radar}
         />

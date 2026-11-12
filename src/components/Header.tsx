@@ -15,12 +15,12 @@ interface HeaderProps {
 const pageTitles: Record<string, string> = {
   dashboard: 'Dashboard',
   monitoring: 'Monitoring Real-time',
-  chat: 'TERANA AI',
+  chat: 'TeraNova AI',
   control: 'Kontrol Perangkat',
   weather: 'Prakiraan Cuaca',
   logs: 'Log & Analitik',
   settings: 'Pengaturan',
-  about: 'About / Tentang TERANA',
+  about: 'About / Tentang TeraNova',
 };
 
 export function Header({ mqttStatus, currentPage, health }: HeaderProps) {

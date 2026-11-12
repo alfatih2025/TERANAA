@@ -10,6 +10,11 @@ export interface NodeSensorData {
   fwi?: number | null;
   fwi_level?: number | null;
   fwi_status?: string | null;
+  ffmc?: number | null;
+  dmc?: number | null;
+  dc?: number | null;
+  isi?: number | null;
+  bui?: number | null;
   created_at: string;
 }
 
@@ -32,11 +37,16 @@ function normalizeNodeData(row: Record<string, unknown>): NodeSensorData | null 
     node_id: nodeId,
     temperature: toNumber(row.temperature),
     humidity: toNumber(row.humidity),
-    soil_moisture: toNumber(row.soil_moisture),
+    soil_moisture: toNumber(row.soil_moisture ?? row.soil),
     soil_temp: toNumber(row.soil_temp ?? row.battery),
-    fwi: toNumber(row.fwi),
+    fwi: toNumber(row.fwi ?? row.fwi_score),
     fwi_level: toNumber(row.fwi_level),
-    fwi_status: typeof row.fwi_status === 'string' ? row.fwi_status : undefined,
+    fwi_status: typeof row.fwi_status === 'string' ? row.fwi_status : null,
+    ffmc: toNumber(row.ffmc),
+    dmc: toNumber(row.dmc),
+    dc: toNumber(row.dc),
+    isi: toNumber(row.isi),
+    bui: toNumber(row.bui),
     created_at: typeof row.created_at === 'string' ? row.created_at : new Date().toISOString(),
   };
 }
@@ -49,10 +59,15 @@ function snapshotToNodeData(snap: MqttSensorSnapshot): NodeSensorData | null {
     temperature: snap.temperature,
     humidity: snap.humidity,
     soil_moisture: snap.soil_moisture,
-    soil_temp: snap.soil_temp,
-    fwi: snap.fwi,
-    fwi_level: snap.fwi_level,
-    fwi_status: snap.fwi_status,
+    soil_temp: snap.soil_temp ?? null,
+    fwi: snap.fwi ?? null,
+    fwi_level: snap.fwi_level ?? null,
+    fwi_status: snap.fwi_status ?? null,
+    ffmc: snap.ffmc ?? null,
+    dmc: snap.dmc ?? null,
+    dc: snap.dc ?? null,
+    isi: snap.isi ?? null,
+    bui: snap.bui ?? null,
     created_at: snap.updatedAt || new Date().toISOString(),
   };
 }
@@ -132,7 +147,7 @@ export function useMultiNodeSensorData() {
     };
   }, [applyNodeData]);
 
-  // 2. Real-time MQTT — baca dari per-node snapshot (bukan snapshot tunggal)
+  // 2. Real-time MQTT — baca per-node snapshot (termasuk Node 3)
   useEffect(() => {
     const unsubscribe = subscribeMqttStatus(() => {
       const snap1 = getNodeSensorSnapshot(1);
@@ -156,5 +171,12 @@ export function useMultiNodeSensorData() {
     return () => { unsubscribe(); };
   }, [applyNodeData]);
 
-  return { node1, node2, node3, loading };
+  // Status apakah Node 3 aktif dan sedang mengirimkan data (dalam 30 menit terakhir)
+  const isNode3Active = Boolean(
+    node3 &&
+    (node3.temperature !== null || node3.humidity !== null || node3.soil_moisture !== null || node3.soil_temp !== null || node3.fwi !== null) &&
+    (!node3.created_at || (new Date().getTime() - new Date(node3.created_at).getTime() < 30 * 60 * 1000))
+  );
+
+  return { node1, node2, node3, loading, isNode3Active };
 }

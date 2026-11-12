@@ -159,7 +159,7 @@ export function DailyHistorySummary({
                   className="rounded-md border border-slate-200 bg-white/60 p-2 dark:border-slate-700 dark:bg-slate-900/80"
                 >
                   <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                    <span className="font-medium">{message.role === 'user' ? 'Anda' : 'TERANA AI'}</span>
+                    <span className="font-medium">{message.role === 'user' ? 'Anda' : 'TeraNova AI'}</span>
                     <time dateTime={message.created_at}>
                       {new Date(message.created_at).toLocaleString('id-ID')}
                     </time>

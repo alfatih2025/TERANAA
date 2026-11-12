@@ -29,14 +29,16 @@ const TOPIC_TEMP = 'sproutai/sensor/temp';
 const TOPIC_HUMIDITY = 'sproutai/sensor/humidity';
 const TOPIC_SCORE = 'sproutai/sensor/score';
 const TOPIC_SYSTEM_FAULT = 'sproutai/system/fault';
-const TOPIC_FWI = 'sproutai/karhutla/fwi';
+const TOPIC_KARHUTLA_FWI = 'sproutai/karhutla/fwi';
+const TOPIC_KARHUTLA_ALERT = 'sproutai/karhutla/alert';
 
 const SUBSCRIBE_TOPICS = [
   DEVICE_STATUS_TOPIC,
   SYSTEM_STATUS_TOPIC,
   TOPIC_SENSOR_JSON,
   TOPIC_SENSOR_NODE,
-  TOPIC_FWI,
+  TOPIC_KARHUTLA_FWI,
+  TOPIC_KARHUTLA_ALERT,
   TOPIC_PH,
   TOPIC_SOIL,
   TOPIC_TEMP,
@@ -66,11 +68,16 @@ export interface MqttSensorSnapshot {
   temperature: number | null;
   humidity: number | null;
   soil_moisture: number | null;
+  ph: number | null;
   soil_temp?: number | null;
   fwi?: number | null;
   fwi_level?: number | null;
   fwi_status?: string | null;
-  ph: number | null;
+  ffmc?: number | null;
+  dmc?: number | null;
+  dc?: number | null;
+  isi?: number | null;
+  bui?: number | null;
   updatedAt: string | null;
   sourceTopic: string | null;
 }
@@ -429,10 +436,15 @@ function normalizeJsonSensorPayload(payload: string): SensorDelta | null {
       humidity: parseNumeric(obj.humidity),
       soil_moisture: parseNumeric(obj.soil_moisture),
       soil_temp: parseNumeric(obj.soil_temp ?? obj.battery),
-      fwi: parseNumeric(obj.fwi),
+      fwi: parseNumeric(obj.fwi ?? obj.fwi_score),
       fwi_level: parseNumeric(obj.fwi_level),
       fwi_status: typeof obj.fwi_status === 'string' ? obj.fwi_status : undefined,
       ph: parseNumeric(obj.ph),
+      ffmc: parseNumeric(obj.ffmc),
+      dmc: parseNumeric(obj.dmc),
+      dc: parseNumeric(obj.dc),
+      isi: parseNumeric(obj.isi),
+      bui: parseNumeric(obj.bui),
     };
   } catch {
     return null;
@@ -492,7 +504,13 @@ function updateFromTopic(topic: string, payload: string) {
     return;
   }
 
-  if (topic === TOPIC_SENSOR_JSON || topic === TOPIC_PH || topic === TOPIC_FWI || topic.startsWith('sproutai/sensor/node/')) {
+  if (
+    topic === TOPIC_SENSOR_JSON ||
+    topic === TOPIC_PH ||
+    topic === TOPIC_KARHUTLA_FWI ||
+    topic === TOPIC_KARHUTLA_ALERT ||
+    topic.startsWith('sproutai/sensor/node/')
+  ) {
     const parsed = normalizeJsonSensorPayload(payload);
     if (parsed) {
       setSensorSnapshot(parsed, topic, true);

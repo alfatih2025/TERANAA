@@ -16,6 +16,15 @@ function normalizeRow(row) {
     temperature: toNumber(row.temperature, null),
     humidity: toNumber(row.humidity, null),
     soil_moisture: toNumber(row.soil_moisture ?? row.soil, null),
+    soil_temp: toNumber(row.soil_temp ?? row.battery, null),
+    fwi: toNumber(row.fwi, null),
+    fwi_level: toNumber(row.fwi_level, null),
+    fwi_status: typeof row.fwi_status === 'string' ? row.fwi_status : null,
+    ffmc: toNumber(row.ffmc, null),
+    dmc: toNumber(row.dmc, null),
+    dc: toNumber(row.dc, null),
+    isi: toNumber(row.isi, null),
+    bui: toNumber(row.bui, null),
     created_at: row.created_at ?? new Date().toISOString(),
   };
 }

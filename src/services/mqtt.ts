@@ -35,6 +35,8 @@ const TOPIC_SCORE = 'sproutai/sensor/score';
 const TOPIC_SYSTEM_FAULT = 'sproutai/system/fault';
 const TOPIC_KARHUTLA_FWI = 'sproutai/karhutla/fwi';
 const TOPIC_KARHUTLA_ALERT = 'sproutai/karhutla/alert';
+const TOPIC_FLOW = 'sproutai/sensor/flow';
+const TOPIC_ACTUATOR_STATUS = 'sproutai/actuator/status';
 
 const SUBSCRIBE_TOPICS = [
   DEVICE_STATUS_TOPIC,
@@ -44,6 +46,8 @@ const SUBSCRIBE_TOPICS = [
   TOPIC_KARHUTLA_FWI,
   TOPIC_KARHUTLA_ALERT,
   TOPIC_PH,
+  TOPIC_FLOW,
+  TOPIC_ACTUATOR_STATUS,
   TOPIC_SOIL,
   TOPIC_TEMP,
   TOPIC_HUMIDITY,
@@ -72,6 +76,10 @@ export interface MqttSensorSnapshot {
   humidity: number | null;
   soil_moisture: number | null;
   ph: number | null;
+  flow_rate?: number | null;
+  total_water?: number | null;
+  session_water?: number | null;
+  valve_status?: string | null;
   soil_temp?: number | null;
   fwi?: number | null;
   fwi_level?: number | null;
@@ -131,6 +139,10 @@ const emptySensorSnapshot: MqttSensorSnapshot = {
   fwi_level: null,
   fwi_status: null,
   ph: null,
+  flow_rate: null,
+  total_water: null,
+  session_water: null,
+  valve_status: null,
   updatedAt: null,
   sourceTopic: null,
 };
@@ -296,8 +308,11 @@ async function persistSensorDataToApi(payload: string, parsed: SensorDelta) {
     temperature: parsed.temperature ?? undefined,
     humidity: parsed.humidity ?? undefined,
     soil_moisture: parsed.soil_moisture ?? undefined,
-    soil_temp: parsed.soil_temp ?? undefined,
     ph: parsed.ph ?? undefined,
+    flow_rate: parsed.flow_rate ?? undefined,
+    total_water: parsed.total_water ?? undefined,
+    session_water: parsed.session_water ?? undefined,
+    valve_status: parsed.valve_status ?? undefined,
   };
   const normalized = JSON.stringify(normalizedObj);
 
@@ -439,9 +454,15 @@ function normalizeJsonSensorPayload(payload: string): SensorDelta | null {
     const obj = JSON.parse(payload);
     if (!obj || typeof obj !== 'object') return null;
 
+    const nodeIdParsed = parseNumeric(obj.node_id);
+    const flowRate = parseNumeric(obj.flow_rate);
+    const totalWater = parseNumeric(obj.total_water ?? obj.total_liters);
+    const sessionWater = parseNumeric(obj.session_water ?? obj.session_liters);
+    const phVal = parseNumeric(obj.ph);
+
     return {
-      device_id: typeof obj.device_id === 'string' ? obj.device_id : undefined,
-      node_id: parseNumeric(obj.node_id),
+      device_id: typeof obj.device_id === 'string' ? obj.device_id : (nodeIdParsed === 0 || flowRate != null || phVal != null ? 'ESP32_Gateway' : undefined),
+      node_id: nodeIdParsed ?? (flowRate != null || phVal != null ? 0 : null),
       temperature: parseNumeric(obj.temperature),
       humidity: parseNumeric(obj.humidity),
       soil_moisture: parseNumeric(obj.soil_moisture),
@@ -449,7 +470,11 @@ function normalizeJsonSensorPayload(payload: string): SensorDelta | null {
       fwi: parseNumeric(obj.fwi ?? obj.fwi_score),
       fwi_level: parseNumeric(obj.fwi_level),
       fwi_status: typeof obj.fwi_status === 'string' ? obj.fwi_status : undefined,
-      ph: parseNumeric(obj.ph),
+      ph: phVal,
+      flow_rate: flowRate,
+      total_water: totalWater,
+      session_water: sessionWater,
+      valve_status: typeof obj.active_valve === 'string' ? obj.active_valve : (typeof obj.valve_status === 'string' ? obj.valve_status : undefined),
       ffmc: parseNumeric(obj.ffmc),
       dmc: parseNumeric(obj.dmc),
       dc: parseNumeric(obj.dc),
@@ -517,6 +542,8 @@ function updateFromTopic(topic: string, payload: string) {
   if (
     topic === TOPIC_SENSOR_JSON ||
     topic === TOPIC_PH ||
+    topic === TOPIC_FLOW ||
+    topic === TOPIC_ACTUATOR_STATUS ||
     topic === TOPIC_KARHUTLA_FWI ||
     topic === TOPIC_KARHUTLA_ALERT ||
     topic.startsWith('sproutai/sensor/node/')

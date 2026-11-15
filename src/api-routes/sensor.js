@@ -241,6 +241,18 @@ export default async function handler(req, res) {
       if (body.score != null || body.fwi != null) {
         sensorPayload.score = toNumber(body.score ?? body.fwi, null);
       }
+      if (body.flow_rate != null) {
+        sensorPayload.flow_rate = toNumber(body.flow_rate, null);
+      }
+      if (body.total_water != null || body.total_liters != null) {
+        sensorPayload.total_water = toNumber(body.total_water ?? body.total_liters, null);
+      }
+      if (body.session_water != null || body.session_liters != null) {
+        sensorPayload.session_water = toNumber(body.session_water ?? body.session_liters, null);
+      }
+      if (body.valve_status != null || body.active_valve != null) {
+        sensorPayload.valve_status = String(body.valve_status ?? body.active_valve);
+      }
 
       let insertData = null;
       try {
@@ -252,6 +264,20 @@ export default async function handler(req, res) {
 
         if (error) {
           console.warn('[Sensor API] Database insert warning:', error?.message);
+          if (error.code === 'PGRST204' || String(error.message).includes('column')) {
+            const basePayload = {
+              node_id: nodeId,
+              device_id: nodeId === 0 ? 'ESP32_Gateway' : `node_${nodeId}`,
+              temperature: toNumber(body.temperature, null),
+              humidity: toNumber(body.humidity, null),
+              soil_moisture: toNumber(body.soil_moisture, null),
+              ph: toNumber(body.ph, null),
+            };
+            const retry = await supabase.from('sensor_data').insert(basePayload).select().single();
+            if (!retry.error) {
+              insertData = retry.data;
+            }
+          }
         } else {
           insertData = data;
         }

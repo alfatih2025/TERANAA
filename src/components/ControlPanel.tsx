@@ -1,10 +1,12 @@
 import { useState } from 'react';
-import { Bot, CirclePower, Droplets, FlaskConical, Hand, Radio, ShieldCheck } from 'lucide-react';
+import { Bot, CirclePower, Droplets, FlaskConical, Hand, Radio } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useControl } from '../hooks/useControl';
 import { useMqttStatus } from '../hooks/useMqttStatus';
 
 type Feedback = { tone: 'success' | 'error'; message: string } | null;
+type ActuatorKey = 'irrigation' | 'fertigation';
+type CommandTarget = ActuatorKey | 'mode';
 
 interface CommandButtonProps {
   label: string;
@@ -42,7 +44,9 @@ interface ActuatorCardProps {
   onTurnOn: () => void;
   onTurnOff: () => void;
   controlsLocked: boolean;
-  loading: boolean;
+  commandsDisabled: boolean;
+  pending: boolean;
+  feedback: Feedback;
 }
 
 function ActuatorCard({
@@ -53,7 +57,9 @@ function ActuatorCard({
   onTurnOn,
   onTurnOff,
   controlsLocked,
-  loading,
+  commandsDisabled,
+  pending,
+  feedback,
 }: ActuatorCardProps) {
   const isActive = active === true;
   const isInactive = active === false;
@@ -65,14 +71,14 @@ function ActuatorCard({
       : 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-200';
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-slate-50/80 p-5 dark:border-slate-700 dark:bg-slate-800/40" aria-label={`Kontrol ${title}`}>
+    <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900" aria-labelledby={`${title.toLowerCase()}-control-title`}>
       <div className="flex items-start justify-between gap-4">
         <div className="flex min-w-0 items-center gap-3">
           <div className="rounded-xl bg-emerald-100 p-2.5 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
             <Icon aria-hidden="true" size={22} />
           </div>
           <div>
-            <h4 className="font-semibold text-slate-900 dark:text-slate-100">{title}</h4>
+            <h3 id={`${title.toLowerCase()}-control-title`} className="text-lg font-semibold text-slate-900 dark:text-slate-100">{title}</h3>
             <p className="mt-1 text-sm leading-5 text-slate-600 dark:text-slate-400">{description}</p>
           </div>
         </div>
@@ -81,13 +87,19 @@ function ActuatorCard({
         </span>
       </div>
 
+      {controlsLocked && (
+        <p className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100" role="status">
+          Aktifkan mode <strong>Manual</strong> untuk mengirim perintah {title.toLowerCase()}.
+        </p>
+      )}
+
       <div className="mt-5 flex gap-3">
         <CommandButton
           label="ON"
           icon={CirclePower}
           variant="on"
           onClick={onTurnOn}
-          disabled={controlsLocked || loading || isActive}
+          disabled={controlsLocked || commandsDisabled || isActive}
           pressed={isActive}
         />
         <CommandButton
@@ -95,10 +107,20 @@ function ActuatorCard({
           icon={CirclePower}
           variant="off"
           onClick={onTurnOff}
-          disabled={controlsLocked || loading || isInactive}
+          disabled={controlsLocked || commandsDisabled || isInactive}
           pressed={isInactive}
         />
       </div>
+
+      {pending && <p className="mt-4 text-sm font-medium text-slate-600 dark:text-slate-300" role="status">Mengirim perintah dan menunggu konfirmasi Gateway...</p>}
+      {feedback && (
+        <p
+          className={`mt-4 rounded-xl border px-4 py-3 text-sm font-medium ${feedback.tone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-400/50 dark:bg-emerald-950/80 dark:text-emerald-50' : 'border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-400/50 dark:bg-rose-950/80 dark:text-rose-50'}`}
+          role={feedback.tone === 'error' ? 'alert' : 'status'}
+        >
+          {feedback.message}
+        </p>
+      )}
     </section>
   );
 }
@@ -106,20 +128,42 @@ function ActuatorCard({
 export function ControlPanel() {
   const { sendCommand, loading } = useControl();
   const { actuatorSnapshot, espOnline } = useMqttStatus();
-  const [feedback, setFeedback] = useState<Feedback>(null);
+  const [modeFeedback, setModeFeedback] = useState<Feedback>(null);
+  const [actuatorFeedback, setActuatorFeedback] = useState<Record<ActuatorKey, Feedback>>({
+    irrigation: null,
+    fertigation: null,
+  });
+  const [pendingTarget, setPendingTarget] = useState<CommandTarget | null>(null);
 
   const mode = actuatorSnapshot?.mode ?? null;
   const manualMode = mode === 'manual';
   const controlsLocked = !manualMode;
 
-  const sendGatewayCommand = async (action: string, successMessage: string) => {
+  const runCommand = async (
+    target: CommandTarget,
+    action: string,
+    successMessage: string,
+    setFeedback: (value: Feedback) => void,
+  ) => {
     setFeedback(null);
+    setPendingTarget(target);
     const result = await sendCommand(action);
     setFeedback(
       result.success
         ? { tone: 'success', message: successMessage }
         : { tone: 'error', message: result.error ?? 'Gateway belum mengonfirmasi perintah.' },
     );
+    setPendingTarget((current) => current === target ? null : current);
+  };
+
+  const sendModeCommand = (action: string, successMessage: string) => {
+    void runCommand('mode', action, successMessage, setModeFeedback);
+  };
+
+  const sendActuatorCommand = (target: ActuatorKey, action: string, successMessage: string) => {
+    void runCommand(target, action, successMessage, (feedback) => {
+      setActuatorFeedback((current) => ({ ...current, [target]: feedback }));
+    });
   };
 
   const modeLabel = mode === 'manual' ? 'Manual' : mode === 'auto' ? 'Otomatis' : 'Belum tersinkron';
@@ -158,7 +202,7 @@ export function ControlPanel() {
             <div className="inline-flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800" role="group" aria-label="Pilih mode operasi Gateway">
               <button
                 type="button"
-                onClick={() => sendGatewayCommand('mode_manual', 'Mode Manual aktif. Anda dapat mengontrol aktuator.')}
+                onClick={() => sendModeCommand('mode_manual', 'Mode Manual aktif. Anda dapat mengontrol aktuator.')}
                 disabled={loading || manualMode}
                 aria-pressed={manualMode}
                 className={`inline-flex min-h-11 items-center gap-2 rounded-lg px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60 ${manualMode ? 'bg-white text-emerald-700 shadow-sm dark:bg-slate-700 dark:text-emerald-300' : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'}`}
@@ -168,7 +212,7 @@ export function ControlPanel() {
               </button>
               <button
                 type="button"
-                onClick={() => sendGatewayCommand('mode_auto', 'Mode Otomatis aktif. Gateway kembali mengatur aktuator.')}
+                onClick={() => sendModeCommand('mode_auto', 'Mode Otomatis aktif. Gateway kembali mengatur aktuator.')}
                 disabled={loading || mode === 'auto'}
                 aria-pressed={mode === 'auto'}
                 className={`inline-flex min-h-11 items-center gap-2 rounded-lg px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60 ${mode === 'auto' ? 'bg-white text-emerald-700 shadow-sm dark:bg-slate-700 dark:text-emerald-300' : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'}`}
@@ -178,38 +222,30 @@ export function ControlPanel() {
               </button>
             </div>
           </div>
+          {pendingTarget === 'mode' && <p className="mt-4 text-sm font-medium text-slate-600 dark:text-slate-300" role="status">Mengirim perubahan mode ke Gateway...</p>}
+          {modeFeedback && (
+            <p
+              className={`mt-4 rounded-xl border px-4 py-3 text-sm font-medium ${modeFeedback.tone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-400/50 dark:bg-emerald-950/80 dark:text-emerald-50' : 'border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-400/50 dark:bg-rose-950/80 dark:text-rose-50'}`}
+              role={modeFeedback.tone === 'error' ? 'alert' : 'status'}
+            >
+              {modeFeedback.message}
+            </p>
+          )}
         </div>
       </section>
 
-      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900" aria-labelledby="actuator-control-title">
-        <div className="flex items-start gap-3">
-          <div className="rounded-2xl bg-cyan-100 p-3 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-300">
-            <ShieldCheck aria-hidden="true" size={24} />
-          </div>
-          <div>
-            <h3 id="actuator-control-title" className="text-lg font-semibold text-slate-900 dark:text-slate-100">Kontrol irigasi &amp; fertigasi</h3>
-            <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-              Tombol tersedia saat mode Manual. Setiap perintah menunggu konfirmasi status dari ESP32 Gateway.
-            </p>
-          </div>
-        </div>
-
-        {!manualMode && (
-          <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100" role="status">
-            Pilih <strong>Manual</strong> untuk mengaktifkan tombol ON dan OFF agar otomatisasi Gateway tidak berbenturan dengan kontrol langsung.
-          </div>
-        )}
-
-        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-6 xl:grid-cols-2">
           <ActuatorCard
             title="Irigasi"
             description="Membuka atau menutup jalur air irigasi."
             icon={Droplets}
             active={actuatorSnapshot?.irigasi ?? null}
             controlsLocked={controlsLocked}
-            loading={loading}
-            onTurnOn={() => sendGatewayCommand('irrigation_on', 'Irigasi dinyalakan oleh ESP32 Gateway.')}
-            onTurnOff={() => sendGatewayCommand('irrigation_off', 'Irigasi dimatikan oleh ESP32 Gateway.')}
+            commandsDisabled={loading}
+            pending={pendingTarget === 'irrigation'}
+            feedback={actuatorFeedback.irrigation}
+            onTurnOn={() => sendActuatorCommand('irrigation', 'irrigation_on', 'Irigasi dinyalakan oleh ESP32 Gateway.')}
+            onTurnOff={() => sendActuatorCommand('irrigation', 'irrigation_off', 'Irigasi dimatikan oleh ESP32 Gateway.')}
           />
           <ActuatorCard
             title="Fertigasi"
@@ -217,22 +253,14 @@ export function ControlPanel() {
             icon={FlaskConical}
             active={actuatorSnapshot?.fertigasi ?? null}
             controlsLocked={controlsLocked}
-            loading={loading}
-            onTurnOn={() => sendGatewayCommand('fertigation_on', 'Fertigasi dinyalakan oleh ESP32 Gateway.')}
-            onTurnOff={() => sendGatewayCommand('fertigation_off', 'Fertigasi dimatikan oleh ESP32 Gateway.')}
+            commandsDisabled={loading}
+            pending={pendingTarget === 'fertigation'}
+            feedback={actuatorFeedback.fertigation}
+            onTurnOn={() => sendActuatorCommand('fertigation', 'fertigation_on', 'Fertigasi dinyalakan oleh ESP32 Gateway.')}
+            onTurnOff={() => sendActuatorCommand('fertigation', 'fertigation_off', 'Fertigasi dimatikan oleh ESP32 Gateway.')}
           />
         </div>
 
-        {loading && <p className="mt-4 text-sm font-medium text-slate-600 dark:text-slate-300" role="status">Mengirim perintah dan menunggu konfirmasi Gateway…</p>}
-        {feedback && (
-          <p
-            className={`mt-4 rounded-xl border px-4 py-3 text-sm font-medium ${feedback.tone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-400/50 dark:bg-emerald-950/80 dark:text-emerald-50' : 'border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-400/50 dark:bg-rose-950/80 dark:text-rose-50'}`}
-            role={feedback.tone === 'error' ? 'alert' : 'status'}
-          >
-            {feedback.message}
-          </p>
-        )}
-      </section>
     </div>
   );
 }

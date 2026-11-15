@@ -309,7 +309,7 @@ export function useControl() {
           mqttCommand.payload,
           mqttCommand.acknowledgement.topic,
           mqttCommand.acknowledgement.matches,
-          12_000,
+          8_000,
           { retain: false, qos: 1 },
         );
       } else if (action === 'settings_sync' || action === 'schedule_set') {

@@ -126,18 +126,23 @@ function ActuatorCard({
 }
 
 export function ControlPanel() {
-  const { sendCommand, loading } = useControl();
+  const { sendCommand } = useControl();
   const { actuatorSnapshot, espOnline } = useMqttStatus();
   const [modeFeedback, setModeFeedback] = useState<Feedback>(null);
   const [actuatorFeedback, setActuatorFeedback] = useState<Record<ActuatorKey, Feedback>>({
     irrigation: null,
     fertigation: null,
   });
-  const [pendingTarget, setPendingTarget] = useState<CommandTarget | null>(null);
+  const [pendingTargets, setPendingTargets] = useState<Record<CommandTarget, boolean>>({
+    irrigation: false,
+    fertigation: false,
+    mode: false,
+  });
 
   const mode = actuatorSnapshot?.mode ?? null;
   const manualMode = mode === 'manual';
-  const controlsLocked = !manualMode;
+  // Hanya kunci kontrol manual jika sistem secara aktif berada di mode Otomatis
+  const controlsLocked = mode === 'auto';
 
   const runCommand = async (
     target: CommandTarget,
@@ -146,14 +151,22 @@ export function ControlPanel() {
     setFeedback: (value: Feedback) => void,
   ) => {
     setFeedback(null);
-    setPendingTarget(target);
-    const result = await sendCommand(action);
-    setFeedback(
-      result.success
-        ? { tone: 'success', message: successMessage }
-        : { tone: 'error', message: result.error ?? 'Gateway belum mengonfirmasi perintah.' },
-    );
-    setPendingTarget((current) => current === target ? null : current);
+    setPendingTargets((current) => ({ ...current, [target]: true }));
+    try {
+      const result = await sendCommand(action);
+      setFeedback(
+        result.success
+          ? { tone: 'success', message: successMessage }
+          : { tone: 'error', message: result.error ?? 'Gateway belum mengonfirmasi perintah.' },
+      );
+    } catch (err) {
+      setFeedback({
+        tone: 'error',
+        message: err instanceof Error ? err.message : 'Gagal mengirim perintah ke Gateway.',
+      });
+    } finally {
+      setPendingTargets((current) => ({ ...current, [target]: false }));
+    }
   };
 
   const sendModeCommand = (action: string, successMessage: string) => {
@@ -203,7 +216,7 @@ export function ControlPanel() {
               <button
                 type="button"
                 onClick={() => sendModeCommand('mode_manual', 'Mode Manual aktif. Anda dapat mengontrol aktuator.')}
-                disabled={loading || manualMode}
+                disabled={pendingTargets.mode || manualMode}
                 aria-pressed={manualMode}
                 className={`inline-flex min-h-11 items-center gap-2 rounded-lg px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60 ${manualMode ? 'bg-white text-emerald-700 shadow-sm dark:bg-slate-700 dark:text-emerald-300' : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'}`}
               >
@@ -213,7 +226,7 @@ export function ControlPanel() {
               <button
                 type="button"
                 onClick={() => sendModeCommand('mode_auto', 'Mode Otomatis aktif. Gateway kembali mengatur aktuator.')}
-                disabled={loading || mode === 'auto'}
+                disabled={pendingTargets.mode || mode === 'auto'}
                 aria-pressed={mode === 'auto'}
                 className={`inline-flex min-h-11 items-center gap-2 rounded-lg px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60 ${mode === 'auto' ? 'bg-white text-emerald-700 shadow-sm dark:bg-slate-700 dark:text-emerald-300' : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'}`}
               >
@@ -222,7 +235,7 @@ export function ControlPanel() {
               </button>
             </div>
           </div>
-          {pendingTarget === 'mode' && <p className="mt-4 text-sm font-medium text-slate-600 dark:text-slate-300" role="status">Mengirim perubahan mode ke Gateway...</p>}
+          {pendingTargets.mode && <p className="mt-4 text-sm font-medium text-slate-600 dark:text-slate-300" role="status">Mengirim perubahan mode ke Gateway...</p>}
           {modeFeedback && (
             <p
               className={`mt-4 rounded-xl border px-4 py-3 text-sm font-medium ${modeFeedback.tone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-400/50 dark:bg-emerald-950/80 dark:text-emerald-50' : 'border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-400/50 dark:bg-rose-950/80 dark:text-rose-50'}`}
@@ -235,31 +248,31 @@ export function ControlPanel() {
       </section>
 
       <div className="grid gap-6 xl:grid-cols-2">
-          <ActuatorCard
-            title="Irigasi"
-            description="Membuka atau menutup jalur air irigasi."
-            icon={Droplets}
-            active={actuatorSnapshot?.irigasi ?? null}
-            controlsLocked={controlsLocked}
-            commandsDisabled={loading}
-            pending={pendingTarget === 'irrigation'}
-            feedback={actuatorFeedback.irrigation}
-            onTurnOn={() => sendActuatorCommand('irrigation', 'irrigation_on', 'Irigasi dinyalakan oleh ESP32 Gateway.')}
-            onTurnOff={() => sendActuatorCommand('irrigation', 'irrigation_off', 'Irigasi dimatikan oleh ESP32 Gateway.')}
-          />
-          <ActuatorCard
-            title="Fertigasi"
-            description="Membuka atau menutup jalur pemberian nutrisi."
-            icon={FlaskConical}
-            active={actuatorSnapshot?.fertigasi ?? null}
-            controlsLocked={controlsLocked}
-            commandsDisabled={loading}
-            pending={pendingTarget === 'fertigation'}
-            feedback={actuatorFeedback.fertigation}
-            onTurnOn={() => sendActuatorCommand('fertigation', 'fertigation_on', 'Fertigasi dinyalakan oleh ESP32 Gateway.')}
-            onTurnOff={() => sendActuatorCommand('fertigation', 'fertigation_off', 'Fertigasi dimatikan oleh ESP32 Gateway.')}
-          />
-        </div>
+        <ActuatorCard
+          title="Irigasi"
+          description="Membuka atau menutup jalur air irigasi."
+          icon={Droplets}
+          active={actuatorSnapshot?.irigasi ?? null}
+          controlsLocked={controlsLocked}
+          commandsDisabled={pendingTargets.irrigation}
+          pending={pendingTargets.irrigation}
+          feedback={actuatorFeedback.irrigation}
+          onTurnOn={() => sendActuatorCommand('irrigation', 'irrigation_on', 'Irigasi dinyalakan oleh ESP32 Gateway.')}
+          onTurnOff={() => sendActuatorCommand('irrigation', 'irrigation_off', 'Irigasi dimatikan oleh ESP32 Gateway.')}
+        />
+        <ActuatorCard
+          title="Fertigasi"
+          description="Membuka atau menutup jalur pemberian nutrisi."
+          icon={FlaskConical}
+          active={actuatorSnapshot?.fertigasi ?? null}
+          controlsLocked={controlsLocked}
+          commandsDisabled={pendingTargets.fertigation}
+          pending={pendingTargets.fertigation}
+          feedback={actuatorFeedback.fertigation}
+          onTurnOn={() => sendActuatorCommand('fertigation', 'fertigation_on', 'Fertigasi dinyalakan oleh ESP32 Gateway.')}
+          onTurnOff={() => sendActuatorCommand('fertigation', 'fertigation_off', 'Fertigasi dimatikan oleh ESP32 Gateway.')}
+        />
+      </div>
 
     </div>
   );

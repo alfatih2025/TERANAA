@@ -228,23 +228,30 @@ export function SettingsPage() {
 
 
   const handleSendWifi = async () => {
+    if (!wifiSsid.trim()) {
+      setWifiError('SSID WiFi tidak boleh kosong');
+      return;
+    }
     setWifiStatus('sending');
     setWifiError(null);
     try {
-      await sendCommand('wifi_update', undefined, { ssid: wifiSsid, password: wifiPassword });
+      const result = await sendCommand('wifi_update', undefined, { ssid: wifiSsid.trim(), password: wifiPassword });
+      if (!result.success) {
+        throw new Error(result.error ?? 'ESP32 gagal terhubung ke WiFi baru. Kembali ke WiFi sebelumnya.');
+      }
       setWifiStatus('sent');
       setWifiSsid('');
       setWifiPassword('');
       recordActivity({
         source: 'settings',
         type: 'wifi_update',
-        title: 'SSID WiFi dikirim',
-        message: 'Kredensial WiFi dikirim ke ESP32.',
+        title: 'SSID WiFi Diperbarui',
+        message: 'Kredensial WiFi baru berhasil diuji dan disimpan permanen di ESP32.',
         details: { ssid: wifiSsid.trim() },
       });
-      setTimeout(() => setWifiStatus('idle'), 2000);
+      setTimeout(() => setWifiStatus('idle'), 4000);
     } catch (err) {
-      setWifiError(err instanceof Error ? err.message : 'Gagal mengirim WiFi');
+      setWifiError(err instanceof Error ? err.message : 'Gagal mengubah konfigurasi WiFi');
       setWifiStatus('error');
     }
   };
@@ -364,16 +371,24 @@ export function SettingsPage() {
         </motion.div>
 
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="rounded-2xl border border-gray-100 bg-white light-card p-6 shadow-sm dark:bg-gray-900 dark:border-gray-800">
-          <div className="mb-6 flex items-center gap-3">
+          <div className="mb-4 flex items-center gap-3">
             <Wifi className="h-5 w-5 text-green-600 dark:text-green-400" />
-            <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100">Kirim WiFi ke ESP32</h3>
+            <div>
+              <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100">Kirim WiFi ke ESP32</h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Otomatis disimpan permanen. Jika salah ketik, ESP32 kembali ke WiFi lama.</p>
+            </div>
           </div>
           <div className="space-y-3">
-            <input disabled={!isAdmin} value={wifiSsid} onChange={(e) => setWifiSsid(e.target.value)} placeholder="SSID WiFi" className="w-full rounded-xl border border-gray-200 bg-slate-100 px-4 py-3 dark:border-gray-800 dark:bg-[#111827]" />
-            <input disabled={!isAdmin} value={wifiPassword} onChange={(e) => setWifiPassword(e.target.value)} placeholder="Password WiFi" type="password" className="w-full rounded-xl border border-gray-200 bg-slate-100 px-4 py-3 dark:border-gray-800 dark:bg-[#111827]" />
-            <button onClick={handleSendWifi} disabled={wifiStatus === 'sending' || controlLoading || !isAdmin} className="w-full rounded-xl bg-green-600 px-4 py-3 font-semibold text-white disabled:opacity-50">
-              {wifiStatus === 'sending' ? 'Mengirim...' : 'Kirim ke ESP32'}
+            <input disabled={!isAdmin} value={wifiSsid} onChange={(e) => setWifiSsid(e.target.value)} placeholder="SSID WiFi Baru" className="w-full rounded-xl border border-gray-200 bg-slate-100 px-4 py-3 dark:border-gray-800 dark:bg-[#111827]" />
+            <input disabled={!isAdmin} value={wifiPassword} onChange={(e) => setWifiPassword(e.target.value)} placeholder="Password WiFi Baru" type="password" className="w-full rounded-xl border border-gray-200 bg-slate-100 px-4 py-3 dark:border-gray-800 dark:bg-[#111827]" />
+            <button onClick={handleSendWifi} disabled={wifiStatus === 'sending' || controlLoading || !isAdmin} className="w-full rounded-xl bg-green-600 px-4 py-3 font-semibold text-white transition hover:bg-green-700 disabled:opacity-50">
+              {wifiStatus === 'sending' ? 'Menguji & Menyambungkan...' : 'Kirim & Simpan ke ESP32'}
             </button>
+            {wifiStatus === 'sent' && (
+              <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 dark:border-emerald-400/50 dark:bg-emerald-950/80 dark:text-emerald-50">
+                ✅ WiFi berhasil diuji & tersimpan permanen di ESP32!
+              </p>
+            )}
             {wifiError && (
               <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-800 dark:border-red-400/50 dark:bg-red-950/80 dark:text-red-50">
                 {wifiError}

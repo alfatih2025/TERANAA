@@ -139,7 +139,8 @@ export function ControlPanel() {
     mode: false,
   });
 
-  const mode = actuatorSnapshot?.mode ?? null;
+  const localSavedMode = (typeof window !== 'undefined' ? localStorage.getItem('teranova_control_mode') : null) as 'manual' | 'auto' | null;
+  const mode = actuatorSnapshot?.mode ?? localSavedMode ?? 'manual';
   const manualMode = mode === 'manual';
   // Hanya kunci kontrol manual jika sistem secara aktif berada di mode Otomatis
   const controlsLocked = mode === 'auto';
@@ -170,6 +171,14 @@ export function ControlPanel() {
   };
 
   const sendModeCommand = (action: string, successMessage: string) => {
+    const nextMode = action === 'mode_manual' ? 'manual' : 'auto';
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('teranova_control_mode', nextMode);
+      } catch {
+        // ignore
+      }
+    }
     void runCommand('mode', action, successMessage, setModeFeedback);
   };
 

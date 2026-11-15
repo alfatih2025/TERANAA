@@ -191,12 +191,28 @@ const defaultSnapshot = (): MqttStatusSnapshot => ({
   webPublishedAt: null,
   subscribedTopics: SUBSCRIBE_TOPICS,
   sensorSnapshot: null,
-  actuatorSnapshot: null,
+  actuatorSnapshot: {
+    irigasi: false,
+    fertigasi: false,
+    pompa: false,
+    mode: getInitialSavedMode(),
+    activeValve: 'IDLE',
+    updatedAt: null,
+    sourceTopic: null,
+  },
 });
 
 let snapshot: MqttStatusSnapshot = defaultSnapshot();
 let sensorSnapshot: MqttSensorSnapshot | null = null;
-let actuatorSnapshot: MqttActuatorSnapshot | null = null;
+let actuatorSnapshot: MqttActuatorSnapshot | null = {
+  irigasi: false,
+  fertigasi: false,
+  pompa: false,
+  mode: getInitialSavedMode(),
+  activeValve: 'IDLE',
+  updatedAt: null,
+  sourceTopic: null,
+};
 let sensorSnapshotByNode: Map<number, MqttSensorSnapshot> = new Map();
 let sensorHistory: MqttSensorSnapshot[] = [];
 let reconnectTimer: number | null = null;
@@ -464,6 +480,18 @@ async function persistSensorDataToApi(payload: string, parsed: SensorDelta) {
   }
 }
 
+function getInitialSavedMode(): 'manual' | 'auto' {
+  if (typeof window !== 'undefined') {
+    try {
+      const saved = localStorage.getItem('teranova_control_mode');
+      if (saved === 'manual' || saved === 'auto') return saved;
+    } catch {
+      // ignore
+    }
+  }
+  return 'manual';
+}
+
 function consumePendingMqttAcks(topic: string, payload: string) {
   for (const waiter of Array.from(pendingMqttAcks)) {
     try {
@@ -472,8 +500,10 @@ function consumePendingMqttAcks(topic: string, payload: string) {
         window.clearTimeout(waiter.timeoutId);
         waiter.resolve();
       }
-    } catch {
-      // ignore matcher failures
+    } catch (err) {
+      pendingMqttAcks.delete(waiter);
+      window.clearTimeout(waiter.timeoutId);
+      waiter.reject(err instanceof Error ? err : new Error(String(err)));
     }
   }
 }
@@ -610,6 +640,14 @@ function setActuatorSnapshot(
     updatedAt: new Date().toISOString(),
     sourceTopic,
   };
+
+  if (actuatorSnapshot.mode && typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('teranova_control_mode', actuatorSnapshot.mode);
+    } catch {
+      // ignore
+    }
+  }
 
   setSnapshot({ actuatorSnapshot });
 }

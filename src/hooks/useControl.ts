@@ -237,6 +237,22 @@ function resolveControlCommand(action: string, duration?: number, data?: Record<
       return {
         topic: 'sproutai/wifi/cmd',
         payload: JSON.stringify({ ssid, password }),
+        acknowledgement: {
+          topic: 'sproutai/wifi/status',
+          matches: (topic, payload) => {
+            if (topic !== 'sproutai/wifi/status') return false;
+            try {
+              const res = JSON.parse(payload);
+              if (res.status === 'SUCCESS') return true;
+              if (res.status === 'FAILED_REVERTED') {
+                throw new Error(res.error || 'Gagal koneksi ke WiFi baru (salah SSID/password). ESP32 kembali ke WiFi sebelumnya.');
+              }
+            } catch (e) {
+              if (e instanceof Error && e.message.includes('Gagal koneksi')) throw e;
+            }
+            return false;
+          },
+        },
       };
     }
     default:
@@ -304,12 +320,13 @@ export function useControl() {
       }
 
       if (mqttCommand.acknowledgement) {
+        const timeoutMs = action === 'wifi_update' ? 18_000 : 8_000;
         await publishMqttWithAck(
           mqttCommand.topic,
           mqttCommand.payload,
           mqttCommand.acknowledgement.topic,
           mqttCommand.acknowledgement.matches,
-          8_000,
+          timeoutMs,
           { retain: false, qos: 1 },
         );
       } else if (action === 'settings_sync' || action === 'schedule_set') {

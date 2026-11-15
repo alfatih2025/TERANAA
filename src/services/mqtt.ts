@@ -326,6 +326,7 @@ async function persistSensorDataToApi(payload: string, parsed: SensorDelta) {
     parsed.temperature != null ||
     parsed.humidity != null ||
     parsed.soil_moisture != null ||
+    parsed.soil_temp != null ||
     parsed.ph != null ||
     parsed.flow_rate != null ||
     parsed.fwi != null;
@@ -333,19 +334,20 @@ async function persistSensorDataToApi(payload: string, parsed: SensorDelta) {
   if (!hasValidMetric) return;
 
   const now = Date.now();
-  const normalizedObj = {
+  // Gunakan null bukan undefined agar JSON.stringify tidak menghapus field
+  const normalizedObj: Record<string, unknown> = {
     node_id: nodeId,
-    temperature: parsed.temperature ?? undefined,
-    humidity: parsed.humidity ?? undefined,
-    soil_moisture: parsed.soil_moisture ?? undefined,
-    soil_temp: parsed.soil_temp ?? undefined,
-    ph: parsed.ph ?? undefined,
-    flow_rate: parsed.flow_rate ?? undefined,
-    total_water: parsed.total_water ?? undefined,
-    session_water: parsed.session_water ?? undefined,
-    valve_status: parsed.valve_status ?? undefined,
-    score: parsed.fwi ?? undefined,
   };
+  if (parsed.temperature != null) normalizedObj.temperature = parsed.temperature;
+  if (parsed.humidity != null) normalizedObj.humidity = parsed.humidity;
+  if (parsed.soil_moisture != null) normalizedObj.soil_moisture = parsed.soil_moisture;
+  if (parsed.soil_temp != null) normalizedObj.soil_temp = parsed.soil_temp;
+  if (parsed.ph != null) normalizedObj.ph = parsed.ph;
+  if (parsed.flow_rate != null) normalizedObj.flow_rate = parsed.flow_rate;
+  if (parsed.total_water != null) normalizedObj.total_water = parsed.total_water;
+  if (parsed.session_water != null) normalizedObj.session_water = parsed.session_water;
+  if (parsed.valve_status != null) normalizedObj.valve_status = parsed.valve_status;
+  if (parsed.fwi != null) normalizedObj.score = parsed.fwi;
   const normalized = JSON.stringify(normalizedObj);
 
   // Cache ke localStorage browser per node agar data terakhir selalu tersimpan & tampil

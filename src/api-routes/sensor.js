@@ -29,16 +29,18 @@ function normalizeRow(row) {
   };
 }
 
-const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // run cleanup at most once per hour
+const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000; // run cleanup at most once per day
+const CLEANUP_RETENTION_DAYS = 30; // simpan data 30 hari
 let lastCleanupAt = 0;
 
 async function cleanupOldSensorData() {
   try {
-    const cutoff = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+    const cutoff = new Date(Date.now() - CLEANUP_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
     await supabase
       .from('sensor_data')
       .delete()
       .lt('created_at', cutoff);
+    console.log(`[Cleanup] Deleted sensor data older than ${CLEANUP_RETENTION_DAYS} days (before ${cutoff})`);
   } catch (err) {
     console.warn('[Cleanup Old Sensor Data Warning]', err?.message);
   }

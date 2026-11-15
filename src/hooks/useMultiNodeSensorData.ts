@@ -33,13 +33,24 @@ function normalizeNodeData(row: Record<string, unknown>): NodeSensorData | null 
   const nodeId = toNumber(row.node_id ?? String(row.device_id ?? '').replace('node_', ''));
   if (nodeId !== 1 && nodeId !== 2 && nodeId !== 3) return null;
 
+  const temp = toNumber(row.temperature);
+  const hum = toNumber(row.humidity);
+  const soil = toNumber(row.soil_moisture ?? row.soil);
+  const soilTemp = toNumber(row.soil_temp ?? row.battery);
+  const fwi = toNumber(row.fwi ?? row.fwi_score);
+
+  // Jika semua nilai kosong/null, abaikan agar tidak menimpa data yang aktif
+  if (temp === null && hum === null && soil === null && soilTemp === null && fwi === null) {
+    return null;
+  }
+
   return {
     node_id: nodeId,
-    temperature: toNumber(row.temperature),
-    humidity: toNumber(row.humidity),
-    soil_moisture: toNumber(row.soil_moisture ?? row.soil),
-    soil_temp: toNumber(row.soil_temp ?? row.battery),
-    fwi: toNumber(row.fwi ?? row.fwi_score),
+    temperature: temp,
+    humidity: hum,
+    soil_moisture: soil,
+    soil_temp: soilTemp,
+    fwi: fwi,
     fwi_level: toNumber(row.fwi_level),
     fwi_status: typeof row.fwi_status === 'string' ? row.fwi_status : null,
     ffmc: toNumber(row.ffmc),
@@ -72,7 +83,7 @@ function snapshotToNodeData(snap: MqttSensorSnapshot): NodeSensorData | null {
   };
 }
 
-/** Bandingkan nilai sensor (termasuk timestamp pembaruan) */
+/** Bandingkan nilai sensor numerik agar tidak re-render berlebihan jika nilai identik */
 function isSameValues(a: NodeSensorData | null, b: NodeSensorData | null): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
@@ -83,8 +94,7 @@ function isSameValues(a: NodeSensorData | null, b: NodeSensorData | null): boole
     a.soil_moisture === b.soil_moisture &&
     a.soil_temp === b.soil_temp &&
     a.fwi === b.fwi &&
-    a.fwi_level === b.fwi_level &&
-    a.created_at === b.created_at
+    a.fwi_level === b.fwi_level
   );
 }
 
@@ -101,33 +111,61 @@ function loadInitialNode(nodeId: number): NodeSensorData | null {
 }
 
 export function useMultiNodeSensorData() {
-  const [node1, setNode1] = useState<NodeSensorData | null>(() => loadInitialNode(1));
-  const [node2, setNode2] = useState<NodeSensorData | null>(() => loadInitialNode(2));
-  const [node3, setNode3] = useState<NodeSensorData | null>(() => loadInitialNode(3));
+  const initial1 = loadInitialNode(1);
+  const initial2 = loadInitialNode(2);
+  const initial3 = loadInitialNode(3);
+
+  const [node1, setNode1] = useState<NodeSensorData | null>(initial1);
+  const [node2, setNode2] = useState<NodeSensorData | null>(initial2);
+  const [node3, setNode3] = useState<NodeSensorData | null>(initial3);
   const [loading, setLoading] = useState(true);
 
   // Ref untuk perbandingan cepat tanpa re-render
-  const node1Ref = useRef<NodeSensorData | null>(null);
-  const node2Ref = useRef<NodeSensorData | null>(null);
-  const node3Ref = useRef<NodeSensorData | null>(null);
+  const node1Ref = useRef<NodeSensorData | null>(initial1);
+  const node2Ref = useRef<NodeSensorData | null>(initial2);
+  const node3Ref = useRef<NodeSensorData | null>(initial3);
 
   const applyNodeData = useCallback((next: NodeSensorData) => {
-    try {
-      localStorage.setItem(`teranova_node_${next.node_id}`, JSON.stringify(next));
-    } catch {}
+    if (!next) return;
 
     if (next.node_id === 1) {
-      if (isSameValues(node1Ref.current, next)) return;
-      node1Ref.current = next;
-      setNode1(next);
+      const prev = node1Ref.current;
+      const merged: NodeSensorData = {
+        ...next,
+        temperature: next.temperature ?? prev?.temperature ?? null,
+        humidity: next.humidity ?? prev?.humidity ?? null,
+        soil_moisture: next.soil_moisture ?? prev?.soil_moisture ?? null,
+      };
+      if (isSameValues(prev, merged)) return;
+      node1Ref.current = merged;
+      setNode1(merged);
+      try { localStorage.setItem('teranova_node_1', JSON.stringify(merged)); } catch {}
     } else if (next.node_id === 2) {
-      if (isSameValues(node2Ref.current, next)) return;
-      node2Ref.current = next;
-      setNode2(next);
+      const prev = node2Ref.current;
+      const merged: NodeSensorData = {
+        ...next,
+        temperature: next.temperature ?? prev?.temperature ?? null,
+        humidity: next.humidity ?? prev?.humidity ?? null,
+        soil_moisture: next.soil_moisture ?? prev?.soil_moisture ?? null,
+      };
+      if (isSameValues(prev, merged)) return;
+      node2Ref.current = merged;
+      setNode2(merged);
+      try { localStorage.setItem('teranova_node_2', JSON.stringify(merged)); } catch {}
     } else if (next.node_id === 3) {
-      if (isSameValues(node3Ref.current, next)) return;
-      node3Ref.current = next;
-      setNode3(next);
+      const prev = node3Ref.current;
+      const merged: NodeSensorData = {
+        ...next,
+        temperature: next.temperature ?? prev?.temperature ?? null,
+        humidity: next.humidity ?? prev?.humidity ?? null,
+        soil_temp: next.soil_temp ?? prev?.soil_temp ?? null,
+        fwi: next.fwi ?? prev?.fwi ?? null,
+        fwi_level: next.fwi_level ?? prev?.fwi_level ?? null,
+      };
+      if (isSameValues(prev, merged)) return;
+      node3Ref.current = merged;
+      setNode3(merged);
+      try { localStorage.setItem('teranova_node_3', JSON.stringify(merged)); } catch {}
     }
   }, []);
 

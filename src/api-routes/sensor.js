@@ -129,11 +129,15 @@ export default async function handler(req, res) {
                 .select('*')
                 .eq('node_id', nId)
                 .order('created_at', { ascending: false })
-                .limit(1);
+                .limit(10);
 
               if (error || !data || (Array.isArray(data) && data.length === 0)) return null;
-              const row = Array.isArray(data) ? data[0] : data;
-              return row ? normalizeRow(row) : null;
+              
+              // Pilih baris terbaru yang memiliki data sensor nyata
+              const validRow = Array.isArray(data) 
+                ? (data.find(r => r.temperature != null || r.humidity != null || r.soil_moisture != null || r.score != null) || data[0])
+                : data;
+              return validRow ? normalizeRow(validRow) : null;
             } catch {
               return null;
             }
@@ -229,20 +233,32 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'node_id must be 0, 1, 2, or 3' });
       }
 
+      const temp = toNumber(body.temperature, null);
+      const hum = toNumber(body.humidity, null);
+      const soil = toNumber(body.soil_moisture ?? body.soil, null);
+      const phVal = toNumber(body.ph, null);
+      const flow = toNumber(body.flow_rate, null);
+      const scoreVal = toNumber(body.score ?? body.fwi, null);
+
+      // Tolak insert jika seluruh metrik sensor kosong/null (mencegah row kosong)
+      if (temp === null && hum === null && soil === null && phVal === null && flow === null && scoreVal === null) {
+        return res.status(400).json({ error: 'Tidak ada metrik sensor valid untuk disimpan' });
+      }
+
       const sensorPayload = {
         node_id: nodeId,
         device_id: nodeId === 0 ? 'ESP32_Gateway' : `node_${nodeId}`,
-        temperature: toNumber(body.temperature, null),
-        humidity: toNumber(body.humidity, null),
-        soil_moisture: toNumber(body.soil_moisture, null),
-        ph: toNumber(body.ph, null),
+        temperature: temp,
+        humidity: hum,
+        soil_moisture: soil,
+        ph: phVal,
       };
 
-      if (body.score != null || body.fwi != null) {
-        sensorPayload.score = toNumber(body.score ?? body.fwi, null);
+      if (scoreVal != null) {
+        sensorPayload.score = scoreVal;
       }
-      if (body.flow_rate != null) {
-        sensorPayload.flow_rate = toNumber(body.flow_rate, null);
+      if (flow != null) {
+        sensorPayload.flow_rate = flow;
       }
       if (body.total_water != null || body.total_liters != null) {
         sensorPayload.total_water = toNumber(body.total_water ?? body.total_liters, null);
@@ -268,10 +284,10 @@ export default async function handler(req, res) {
             const basePayload = {
               node_id: nodeId,
               device_id: nodeId === 0 ? 'ESP32_Gateway' : `node_${nodeId}`,
-              temperature: toNumber(body.temperature, null),
-              humidity: toNumber(body.humidity, null),
-              soil_moisture: toNumber(body.soil_moisture, null),
-              ph: toNumber(body.ph, null),
+              temperature: temp,
+              humidity: hum,
+              soil_moisture: soil,
+              ph: phVal,
             };
             const retry = await supabase.from('sensor_data').insert(basePayload).select().single();
             if (!retry.error) {
@@ -293,8 +309,11 @@ export default async function handler(req, res) {
         };
       }
 
-      // Trigger MQTT publish asynchronously in background
-      publishToMqttAsync(insertData, nodeId, sensorPayload);
+      // Hanya publish ulang ke MQTT jika eksplisit diminta (misal dari script eksternal)
+      // JANGAN publish ulang otomatis dari web client agar tidak terjadi loop echo
+      if (body.publish_mqtt === true) {
+        publishToMqttAsync(insertData, nodeId, sensorPayload);
+      }
 
       return res.status(201).json(normalizeRow(insertData));
     }

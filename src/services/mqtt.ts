@@ -229,25 +229,44 @@ function setSensorSnapshot(next: SensorDelta, sourceTopic: string, force = false
   const now = new Date().toISOString();
   const nodeId = next.node_id;
 
-  // --- Per-node snapshot (anti-glitch) ---
+  // --- Per-node snapshot (anti-glitch & state retention) ---
   if (nodeId != null) {
     const prevNode = sensorSnapshotByNode.get(nodeId) ?? { ...emptySensorSnapshot, node_id: nodeId };
+    
+    // Gabungkan data: pertahankan nilai sebelumnya jika paket baru hanya mengirim sebagian sensor
     const mergedNode: MqttSensorSnapshot = {
       ...prevNode,
-      ...next,
+      node_id: nodeId,
+      device_id: next.device_id ?? prevNode.device_id,
+      temperature: next.temperature ?? prevNode.temperature,
+      humidity: next.humidity ?? prevNode.humidity,
+      soil_moisture: next.soil_moisture ?? prevNode.soil_moisture,
+      soil_temp: next.soil_temp ?? prevNode.soil_temp,
+      ph: next.ph ?? prevNode.ph,
+      flow_rate: next.flow_rate ?? prevNode.flow_rate,
+      total_water: next.total_water ?? prevNode.total_water,
+      session_water: next.session_water ?? prevNode.session_water,
+      valve_status: next.valve_status ?? prevNode.valve_status,
+      fwi: next.fwi ?? prevNode.fwi,
+      fwi_level: next.fwi_level ?? prevNode.fwi_level,
+      fwi_status: next.fwi_status ?? prevNode.fwi_status,
       updatedAt: now,
       sourceTopic,
     };
 
-    // Deduplikasi: jika nilai sensor identik, jangan emit ulang
-    const prevKey = JSON.stringify({ t: prevNode.temperature, h: prevNode.humidity, s: prevNode.soil_moisture, p: prevNode.ph });
-    const nextKey = JSON.stringify({ t: mergedNode.temperature, h: mergedNode.humidity, s: mergedNode.soil_moisture, p: mergedNode.ph });
-    if (!force && prevKey === nextKey) {
-      // Data sensor sama persis, skip re-render
-      return;
-    }
+    // Deduplikasi nilai sensor numerik agar tidak spam re-render
+    const prevKey = `${prevNode.temperature}|${prevNode.humidity}|${prevNode.soil_moisture}|${prevNode.ph}|${prevNode.flow_rate}|${prevNode.fwi}`;
+    const nextKey = `${mergedNode.temperature}|${mergedNode.humidity}|${mergedNode.soil_moisture}|${mergedNode.ph}|${mergedNode.flow_rate}|${mergedNode.fwi}`;
 
     sensorSnapshotByNode.set(nodeId, mergedNode);
+
+    // Simpan ke Supabase (menggunakan mergedNode yang lengkap)
+    persistSensorDataToApi(JSON.stringify(mergedNode), mergedNode);
+
+    if (!force && prevKey === nextKey) {
+      // Nilai sensor sama persis, lewati emit re-render
+      return;
+    }
   }
 
   // --- Legacy single snapshot (untuk kompabilitas) ---
@@ -271,9 +290,6 @@ function setSensorSnapshot(next: SensorDelta, sourceTopic: string, force = false
     lastMessageAt: now,
     sensorSnapshot,
   };
-  
-  // Save to database automatically when web is open
-  persistSensorDataToApi(JSON.stringify(merged), next);
   
   emit();
 }
@@ -301,7 +317,21 @@ export function parseMqttJsonPayload(payload: string): Record<string, unknown> |
 async function persistSensorDataToApi(payload: string, parsed: SensorDelta) {
   if (typeof window === 'undefined') return;
 
-  const nodeId = parsed.node_id ?? 1;
+  const nodeId = parsed.node_id;
+  // Jika node_id tidak diketahui, jangan simpan sembarangan
+  if (nodeId == null) return;
+
+  // Pastikan ada setidaknya 1 metrik sensor numerik yang valid (hindari simpan row kosong)
+  const hasValidMetric =
+    parsed.temperature != null ||
+    parsed.humidity != null ||
+    parsed.soil_moisture != null ||
+    parsed.ph != null ||
+    parsed.flow_rate != null ||
+    parsed.fwi != null;
+
+  if (!hasValidMetric) return;
+
   const now = Date.now();
   const normalizedObj = {
     node_id: nodeId,
@@ -313,6 +343,7 @@ async function persistSensorDataToApi(payload: string, parsed: SensorDelta) {
     total_water: parsed.total_water ?? undefined,
     session_water: parsed.session_water ?? undefined,
     valve_status: parsed.valve_status ?? undefined,
+    score: parsed.fwi ?? undefined,
   };
   const normalized = JSON.stringify(normalizedObj);
 
@@ -550,7 +581,7 @@ function updateFromTopic(topic: string, payload: string) {
   ) {
     const parsed = normalizeJsonSensorPayload(payload);
     if (parsed) {
-      setSensorSnapshot(parsed, topic, true);
+      setSensorSnapshot(parsed, topic, false);
       setSnapshot({
         lastTopic: topic,
         lastPayload: payload,

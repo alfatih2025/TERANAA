@@ -232,38 +232,46 @@ export default async function handler(req, res) {
       const { message, yesterdayHistory = null } = req.body || {};
       const user_id = authenticatedUser.uid;
 
-      // Ambil 30 baris sensor data terbaru dari Supabase untuk multi-node & analisa tren
-      const { data: recentRows } = await supabase
-        .from('sensor_data')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(30);
+      // Ambil data terbaru dari setiap node secara spesifik (0: Gateway, 1: Node 1, 2: Node 2, 3: Node 3)
+      const nodeIds = [0, 1, 2, 3];
+      const nodeResults = await Promise.all(
+        nodeIds.map((n) =>
+          supabase
+            .from('sensor_data')
+            .select('*')
+            .eq('node_id', n)
+            .order('id', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+        )
+      );
 
       const multiNode = {};
-      if (Array.isArray(recentRows)) {
-        for (const r of recentRows) {
-          if (r.node_id != null && !multiNode[r.node_id]) {
-            multiNode[r.node_id] = r;
-          }
+      nodeIds.forEach((n, idx) => {
+        if (nodeResults[idx]?.data) {
+          multiNode[n] = nodeResults[idx].data;
         }
-      }
+      });
 
-      // Prioritaskan node tanaman (Node 1 atau Node 2) untuk metrik hortikultura dasar
-      const latestSensor = multiNode[1] || multiNode[2] || (Array.isArray(recentRows) ? recentRows[0] : null) || {};
+      // Ambil juga beberapa riwayat data Node 3 untuk melihat tren pergerakan suhu gambut & FWI
+      const { data: n3History } = await supabase
+        .from('sensor_data')
+        .select('soil_temp, score, created_at')
+        .eq('node_id', 3)
+        .order('id', { ascending: false })
+        .limit(5);
 
-      // Buat ringkasan tren singkat dari database
+      // Prioritaskan node tanaman (Node 2 atau Node 1) untuk metrik hortikultura dasar
+      const latestSensor = multiNode[2] || multiNode[1] || multiNode[3] || multiNode[0] || {};
+
       let trendSummary = '';
-      if (Array.isArray(recentRows) && recentRows.length > 0) {
-        const n3Rows = recentRows.filter(r => r.node_id === 3).slice(0, 5);
-        if (n3Rows.length > 1) {
-          const first = n3Rows[n3Rows.length - 1];
-          const latest = n3Rows[0];
-          trendSummary += `- Suhu Gambut (Node 3): bergerak dari ${first.soil_temp ?? '-'}°C ke ${latest.soil_temp ?? '-'}°C (Skor FWI: ${latest.score ?? '-'})\n`;
-        }
-        const gwRows = recentRows.filter(r => r.node_id === 0).slice(0, 5);
-        if (gwRows.length > 0) {
-          trendSummary += `- Gateway: Total air terakumulasi ${gwRows[0].total_water ?? 0}L, laju aliran saat ini ${gwRows[0].flow_rate ?? 0} L/menit\n`;
-        }
+      if (Array.isArray(n3History) && n3History.length > 1) {
+        const oldest = n3History[n3History.length - 1];
+        const newest = n3History[0];
+        trendSummary += `- Tren Suhu Gambut (Node 3): bergerak dari ${oldest.soil_temp ?? '-'}°C ke ${newest.soil_temp ?? '-'}°C (Skor FWI terkini: ${newest.score ?? '-'})\n`;
+      }
+      if (multiNode[0]) {
+        trendSummary += `- Status Irigasi Gateway: Total air terakumulasi ${multiNode[0].total_water ?? 0}L, debit aliran ${multiNode[0].flow_rate ?? 0} L/menit, valve: ${multiNode[0].valve_status ?? 'IDLE'}\n`;
       }
 
       const { data: latestSettings } = await supabase

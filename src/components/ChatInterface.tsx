@@ -26,31 +26,48 @@ interface ChatInterfaceProps {
 function renderInlineText(text: string): ReactNode {
   if (!text) return null;
 
-  // Tokenize bold (**text**), inline code (`code`), and badge [ID ...] or [... WIB]
-  const regex = /(\*\*[^*]+\*\*|`[^`]+`|\[(?:ID\s*\d+|[^\]]+WIB)\])/g;
+  // Tokenize: bold (**text**), inline code (`code`), italic (*text*), badge [ID ...] or [... WIB]
+  const regex = /(\*\*(?:[^*]|\*(?!\*))+\*\*|`[^`]+`|\*(?!\*)[^*]+\*(?!\*)|\[(?:ID\s*\d+|[^\]]+WIB)\])/g;
   const parts = text.split(regex).filter(Boolean);
 
   return parts.map((part, index) => {
-    // Bold
+    // Bold — also handles **[ID 901]** by extracting inner content
     if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+      const inner = part.slice(2, -2);
+      // If inner is a badge pattern, render as badge (bold styling included)
+      if (/^\[(?:ID\s*\d+|[^\]]+WIB)\]$/.test(inner)) {
+        return (
+          <span key={index} className="inline-flex items-center rounded-md bg-emerald-100 px-1.5 py-0.5 font-mono text-[11px] font-bold text-emerald-800 border border-emerald-300 dark:bg-emerald-900/60 dark:text-emerald-200 dark:border-emerald-700/60 shadow-xs mr-1">
+            {inner.slice(1, -1)}
+          </span>
+        );
+      }
       return (
-        <strong key={index} className="font-semibold text-slate-900 dark:text-emerald-300">
-          {part.slice(2, -2)}
+        <strong key={index} className="font-semibold text-slate-900 dark:text-white">
+          {inner}
         </strong>
       );
     }
     // Inline code
     if (part.startsWith('`') && part.endsWith('`') && part.length > 2) {
       return (
-        <code key={index} className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-emerald-800 border border-slate-200/80 dark:bg-slate-800 dark:text-emerald-300 dark:border-slate-700/60">
+        <code key={index} className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-emerald-800 border border-slate-200/80 dark:bg-slate-800/80 dark:text-emerald-300 dark:border-slate-700/60">
           {part.slice(1, -1)}
         </code>
+      );
+    }
+    // Italic (*text*)
+    if (part.startsWith('*') && part.endsWith('*') && part.length > 2) {
+      return (
+        <em key={index} className="italic text-slate-600 dark:text-slate-300">
+          {part.slice(1, -1)}
+        </em>
       );
     }
     // Badge [ID ...] or [... WIB]
     if (part.startsWith('[') && part.endsWith(']')) {
       return (
-        <span key={index} className="inline-flex items-center rounded-md bg-emerald-50 px-1.5 py-0.5 font-mono text-[11px] font-bold text-emerald-700 border border-emerald-200 dark:bg-emerald-950/70 dark:text-emerald-300 dark:border-emerald-800/60 shadow-xs mr-1">
+        <span key={index} className="inline-flex items-center rounded-md bg-emerald-50 px-1.5 py-0.5 font-mono text-[11px] font-bold text-emerald-700 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800/50 shadow-xs mr-1">
           {part.slice(1, -1)}
         </span>
       );
@@ -65,6 +82,9 @@ function renderAssistantMessage(content: string) {
   const blocks: ReactNode[] = [];
   let currentList: ReactNode[] = [];
   let listType: 'ul' | 'ol' | null = null;
+  let inCodeBlock = false;
+  let codeLines: string[] = [];
+  let codeLang = '';
 
   const flushList = () => {
     if (!currentList.length || !listType) return;
@@ -77,8 +97,43 @@ function renderAssistantMessage(content: string) {
     listType = null;
   };
 
+  const flushCodeBlock = () => {
+    if (!codeLines.length) return;
+    blocks.push(
+      <div key={`code-${blocks.length}`} className="my-2 overflow-x-auto rounded-xl border border-slate-200/80 bg-slate-50 dark:border-slate-700/60 dark:bg-slate-800/70">
+        {codeLang && (
+          <div className="border-b border-slate-200/60 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:border-slate-700/40 dark:text-slate-400">
+            {codeLang}
+          </div>
+        )}
+        <pre className="px-4 py-3 text-xs leading-relaxed text-slate-800 dark:text-slate-200 font-mono whitespace-pre-wrap">
+          <code>{codeLines.join('\n')}</code>
+        </pre>
+      </div>,
+    );
+    codeLines = [];
+    codeLang = '';
+  };
+
   lines.forEach((line, lineIndex) => {
     const trimmed = line.trim();
+
+    // Fenced code block
+    if (trimmed.startsWith('```')) {
+      if (!inCodeBlock) {
+        flushList();
+        inCodeBlock = true;
+        codeLang = trimmed.slice(3).trim();
+      } else {
+        inCodeBlock = false;
+        flushCodeBlock();
+      }
+      return;
+    }
+    if (inCodeBlock) {
+      codeLines.push(line);
+      return;
+    }
 
     if (!trimmed) {
       flushList();
@@ -86,16 +141,38 @@ function renderAssistantMessage(content: string) {
       return;
     }
 
-    if (trimmed.startsWith('## ')) {
+    // Horizontal rule
+    if (/^---+$/.test(trimmed) || /^\*\*\*+$/.test(trimmed)) {
       flushList();
       blocks.push(
-        <h4 key={`h2-${lineIndex}`} className="mt-2.5 mb-1 text-sm font-bold tracking-wide text-emerald-600 dark:text-emerald-400">
+        <hr key={`hr-${lineIndex}`} className="my-2 border-slate-200/80 dark:border-slate-700/60" />,
+      );
+      return;
+    }
+
+    // H1
+    if (trimmed.startsWith('# ') && !trimmed.startsWith('## ')) {
+      flushList();
+      blocks.push(
+        <h3 key={`h1-${lineIndex}`} className="mt-3 mb-1.5 text-base font-bold text-slate-800 dark:text-slate-100 leading-snug">
+          {renderInlineText(trimmed.slice(2))}
+        </h3>,
+      );
+      return;
+    }
+
+    // H2
+    if (trimmed.startsWith('## ') && !trimmed.startsWith('### ')) {
+      flushList();
+      blocks.push(
+        <h4 key={`h2-${lineIndex}`} className="mt-2.5 mb-1 text-sm font-bold tracking-wide text-emerald-700 dark:text-emerald-400">
           {renderInlineText(trimmed.slice(3))}
         </h4>,
       );
       return;
     }
 
+    // H3
     if (trimmed.startsWith('### ')) {
       flushList();
       blocks.push(
@@ -106,25 +183,39 @@ function renderAssistantMessage(content: string) {
       return;
     }
 
-    // List item (- or * or •)
-    if (/^[-*•]\s+/.test(trimmed)) {
+    // Block quote
+    if (trimmed.startsWith('> ')) {
+      flushList();
+      blocks.push(
+        <div key={`bq-${lineIndex}`} className="my-1 flex gap-2.5">
+          <div className="w-1 shrink-0 rounded-full bg-emerald-400 dark:bg-emerald-600" />
+          <p className="text-sm italic leading-relaxed text-slate-600 dark:text-slate-300">
+            {renderInlineText(trimmed.slice(2))}
+          </p>
+        </div>,
+      );
+      return;
+    }
+
+    // Unordered list item (- or * but NOT ** bold or *** hr)
+    if (/^[-•]\s+/.test(trimmed) || (/^\*\s+/.test(trimmed) && !trimmed.startsWith('**'))) {
       if (listType !== 'ul') {
         flushList();
         listType = 'ul';
       }
-      const rawText = trimmed.replace(/^[-*•]\s+/, '');
+      const rawText = trimmed.replace(/^[-•*]\s+/, '');
       const isRecordRow = rawText.includes('[ID') || rawText.includes('WIB');
 
       if (isRecordRow) {
         currentList.push(
-          <div key={`rec-${lineIndex}`} className="rounded-xl border border-slate-200/80 bg-slate-50/70 p-2.5 text-xs leading-relaxed text-slate-700 shadow-xs transition hover:border-emerald-300 dark:border-slate-800/80 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:border-emerald-500/30">
+          <div key={`rec-${lineIndex}`} className="rounded-xl border border-slate-200/70 bg-slate-50/80 p-2.5 text-xs leading-relaxed text-slate-700 shadow-xs transition hover:border-emerald-300/70 dark:border-slate-700/60 dark:bg-slate-800/50 dark:text-slate-200 dark:hover:border-emerald-600/40">
             {renderInlineText(rawText)}
           </div>,
         );
       } else {
         currentList.push(
           <div key={`ul-${lineIndex}`} className="flex items-start gap-2 text-sm leading-relaxed text-slate-700 dark:text-slate-200">
-            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500 shadow-xs" />
+            <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500 dark:bg-emerald-400" />
             <span className="flex-1">{renderInlineText(rawText)}</span>
           </div>,
         );
@@ -142,7 +233,7 @@ function renderAssistantMessage(content: string) {
       const text = trimmed.replace(/^\d+[.)]\s+/, '');
       currentList.push(
         <div key={`ol-${lineIndex}`} className="flex items-start gap-2.5 text-sm leading-relaxed text-slate-700 dark:text-slate-200">
-          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-100 text-[11px] font-bold text-emerald-700 dark:bg-emerald-950/80 dark:text-emerald-300">
+          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-100 text-[11px] font-bold text-emerald-700 dark:bg-emerald-900/70 dark:text-emerald-300">
             {number.replace(/[.)]/g, '')}
           </span>
           <span className="flex-1">{renderInlineText(text)}</span>
@@ -153,7 +244,7 @@ function renderAssistantMessage(content: string) {
 
     flushList();
 
-    // Standard paragraph with dark mode typography
+    // Standard paragraph
     blocks.push(
       <p key={`p-${lineIndex}`} className="text-sm leading-relaxed text-slate-700 dark:text-slate-200">
         {renderInlineText(trimmed)}
@@ -161,7 +252,10 @@ function renderAssistantMessage(content: string) {
     );
   });
 
+  // Flush any remaining
+  if (inCodeBlock) flushCodeBlock();
   flushList();
+
   return <div className="space-y-1.5">{blocks}</div>;
 }
 

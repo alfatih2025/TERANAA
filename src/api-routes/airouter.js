@@ -47,11 +47,64 @@ export default async function handler(req, res) {
       });
     }
 
+    // Selalu ambil data sensor terbaru per node langsung dari Supabase
+    // agar data AI tidak bergantung pada state browser yang mungkin belum update
+    const nodeIds = [0, 1, 2, 3];
+    const nodeResults = await Promise.all(
+      nodeIds.map((n) =>
+        supabase
+          .from('sensor_data')
+          .select('*')
+          .eq('node_id', n)
+          .order('id', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      )
+    );
+
+    const dbNodes = {};
+    nodeIds.forEach((n, idx) => {
+      if (nodeResults[idx]?.data) {
+        dbNodes[n] = nodeResults[idx].data;
+      }
+    });
+
+    const n0 = dbNodes[0] || {};
+    const n1 = dbNodes[1] || {};
+    const n2 = dbNodes[2] || {};
+    const n3 = dbNodes[3] || {};
+
+    // Gabungkan data dari Supabase dengan sensorContext dari frontend
+    const enrichedSensorContext = {
+      ...(sensorContext || {}),
+      // Prioritaskan suhu hortikultura dari node 2 jika node 1 bernilai 0 (sensor offline)
+      temperature: (n2.temperature != null && n2.temperature > 0) ? n2.temperature : (n1.temperature ?? sensorContext?.temperature ?? null),
+      humidity: (n2.humidity != null && n2.humidity > 0) ? n2.humidity : (n1.humidity ?? sensorContext?.humidity ?? null),
+      soil_moisture: n1.soil_moisture ?? n2.soil_moisture ?? sensorContext?.soil_moisture ?? null,
+      
+      // Node 3 Karhutla
+      soil_temp: n3.soil_temp ?? sensorContext?.soil_temp ?? null,
+      fwi: n3.score ?? sensorContext?.fwi ?? null,
+      fwi_status: n3.fwi_status ?? (n3.score != null ? (n3.score >= 32 ? 'SANGAT TINGGI' : n3.score >= 18 ? 'TINGGI' : n3.score >= 9 ? 'SEDANG' : 'RENDAH (AMAN)') : null),
+      
+      // Gateway (Flow & pH)
+      ph: n0.ph ?? sensorContext?.ph ?? null,
+      flow_rate: n0.flow_rate ?? sensorContext?.flow_rate ?? null,
+      total_water: n0.total_water ?? sensorContext?.total_water ?? null,
+      valve_status: n0.valve_status ?? sensorContext?.valve_status ?? null,
+
+      // Detail ringkasan per node
+      node1: n1.id ? { temp: n1.temperature, hum: n1.humidity, soil: n1.soil_moisture } : null,
+      node2: n2.id ? { temp: n2.temperature, hum: n2.humidity, soil: n2.soil_moisture } : null,
+      node3: n3.id ? { soil_temp: n3.soil_temp, temp: n3.temperature, hum: n3.humidity, fwi: n3.score, fwi_status: n3.fwi_status } : null,
+      gateway: n0.id ? { ph: n0.ph, flow_rate: n0.flow_rate, total_water: n0.total_water, valve_status: n0.valve_status } : null,
+    };
+
     const result = await sendAiRouterMessage({
       message,
       images,
       history,
-      sensorContext,
+      sensorContext: enrichedSensorContext,
       aiSettings,
       yesterdayHistory,
       origin: req.headers.origin,

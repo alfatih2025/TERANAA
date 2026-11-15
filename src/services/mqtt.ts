@@ -338,6 +338,7 @@ async function persistSensorDataToApi(payload: string, parsed: SensorDelta) {
     temperature: parsed.temperature ?? undefined,
     humidity: parsed.humidity ?? undefined,
     soil_moisture: parsed.soil_moisture ?? undefined,
+    soil_temp: parsed.soil_temp ?? undefined,
     ph: parsed.ph ?? undefined,
     flow_rate: parsed.flow_rate ?? undefined,
     total_water: parsed.total_water ?? undefined,

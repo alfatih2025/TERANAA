@@ -236,12 +236,13 @@ export default async function handler(req, res) {
       const temp = toNumber(body.temperature, null);
       const hum = toNumber(body.humidity, null);
       const soil = toNumber(body.soil_moisture ?? body.soil, null);
+      const soilTemp = toNumber(body.soil_temp ?? body.battery, null);
       const phVal = toNumber(body.ph, null);
       const flow = toNumber(body.flow_rate, null);
       const scoreVal = toNumber(body.score ?? body.fwi, null);
 
       // Tolak insert jika seluruh metrik sensor kosong/null (mencegah row kosong)
-      if (temp === null && hum === null && soil === null && phVal === null && flow === null && scoreVal === null) {
+      if (temp === null && hum === null && soil === null && soilTemp === null && phVal === null && flow === null && scoreVal === null) {
         return res.status(400).json({ error: 'Tidak ada metrik sensor valid untuk disimpan' });
       }
 
@@ -254,6 +255,9 @@ export default async function handler(req, res) {
         ph: phVal,
       };
 
+      if (soilTemp != null) {
+        sensorPayload.soil_temp = soilTemp;
+      }
       if (scoreVal != null) {
         sensorPayload.score = scoreVal;
       }

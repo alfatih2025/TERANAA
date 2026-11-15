@@ -225,17 +225,22 @@ export default async function handler(req, res) {
       const body = req.body || {};
 
       const nodeId = Number(body.node_id);
-      if (!Number.isInteger(nodeId) || (nodeId !== 1 && nodeId !== 2 && nodeId !== 3)) {
-        return res.status(400).json({ error: 'node_id must be 1, 2, or 3' });
+      if (!Number.isInteger(nodeId) || (nodeId < 0 || nodeId > 3)) {
+        return res.status(400).json({ error: 'node_id must be 0, 1, 2, or 3' });
       }
 
       const sensorPayload = {
         node_id: nodeId,
+        device_id: nodeId === 0 ? 'ESP32_Gateway' : `node_${nodeId}`,
         temperature: toNumber(body.temperature, null),
         humidity: toNumber(body.humidity, null),
         soil_moisture: toNumber(body.soil_moisture, null),
-        soil_temp: toNumber(body.soil_temp ?? body.battery, null),
+        ph: toNumber(body.ph, null),
       };
+
+      if (body.score != null || body.fwi != null) {
+        sensorPayload.score = toNumber(body.score ?? body.fwi, null);
+      }
 
       let insertData = null;
       try {

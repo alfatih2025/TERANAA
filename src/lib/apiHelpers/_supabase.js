@@ -9,7 +9,7 @@ function readEnv(...names) {
   return '';
 }
 
-const SUPABASE_URL = readEnv('SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_URL', 'VITE_SUPABASE_URL');
+const SUPABASE_URL = readEnv('SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_URL', 'VITE_SUPABASE_URL') || 'https://awhiuhjnxrohmvvomile.supabase.co';
 const SUPABASE_KEY = readEnv(
   'SUPABASE_SERVICE_ROLE_KEY',
   'VITE_SUPABASE_SERVICE_ROLE_KEY',
@@ -17,7 +17,7 @@ const SUPABASE_KEY = readEnv(
   'SUPABASE_ANON_KEY',
   'NEXT_PUBLIC_SUPABASE_ANON_KEY',
   'VITE_SUPABASE_ANON_KEY',
-);
+) || 'sb_publishable_W_IaTg13a74JwPcHuWtgSQ_wq36aSg1';
 
 let realSupabase = null;
 if (SUPABASE_URL && SUPABASE_KEY) {
@@ -227,18 +227,7 @@ const supabase = new Proxy(
         return (tableName) => {
           if (realSupabase) {
             try {
-              const queryBuilder = realSupabase.from(tableName);
-              const originalThen = queryBuilder.then.bind(queryBuilder);
-              queryBuilder.then = (onFulfilled, onRejected) => {
-                return originalThen((res) => {
-                  if (res && res.error && (res.error.code === '42501' || res.status === 401)) {
-                    console.warn(`[Supabase RLS Fallback] Table '${tableName}' violates RLS policy (${res.error.message}). Menggunakan penyimpanan lokal.`);
-                    return mockSupabase.from(tableName).then(onFulfilled, onRejected);
-                  }
-                  return onFulfilled ? onFulfilled(res) : res;
-                }, onRejected);
-              };
-              return queryBuilder;
+              return realSupabase.from(tableName);
             } catch {
               return mockSupabase.from(tableName);
             }

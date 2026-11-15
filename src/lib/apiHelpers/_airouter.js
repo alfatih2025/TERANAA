@@ -101,6 +101,15 @@ function buildSystemPrompt(sensor, yesterdayHistory) {
     sensor.node3 ? `NODE 3 (Sektor Gambut - Mitigasi Karhutla):\n  • Suhu Lapisan Gambut (DS18B20): ${sensor.node3.soil_temp ?? '-'} °C\n  • Suhu Udara Mikro: ${sensor.node3.temp ?? '-'} °C\n  • Kelembapan Udara Mikro: ${sensor.node3.hum ?? '-'} %\n  • Kadar Air Tanah Gambut: ${sensor.node3.soil_moisture ?? '-'} %\n  • Skor FWI (Fire Weather Index BMKG): ${sensor.node3.fwi ?? '-'}\n  • Status Bahaya Karhutla: ${sensor.node3.fwi_status ?? '-'}\n  • Status: ${sensor.node3.status || 'Aktif'}` : 'NODE 3: Data belum tersedia',
     sensor.gateway ? `ESP32 GATEWAY (Kontrol Irigasi & Aktuator):\n  • Sensor pH Tanah: ${sensor.gateway.ph ?? '-'}\n  • Debit Aliran Air (Flow Rate): ${sensor.gateway.flow_rate ?? 0} L/menit\n  • Total Volume Air Tersiram: ${sensor.gateway.total_water ?? 0} Liter\n  • Status Katup Irigasi (Valve): ${sensor.gateway.valve_status ?? 'IDLE'}\n  • Status Pompa: ${sensor.gateway.pump_status ?? 'MATI'}` : 'GATEWAY: Data belum tersedia',
     '======================================================',
+    '',
+    '=== RIWAYAT TIME-SERIES DARI DATABASE SUPABASE (DATA HISTORIS MULTI-BARIS) ===',
+    'Berikut adalah deretan data historis terbaru yang tersimpan di tabel sensor_data Supabase:',
+    'A. RIWAYAT DATA NODE 3 (UNTUK PREDIKSI KARHUTLA & TREN SUHU GAMBUT):',
+    ...(sensor.n3_history && sensor.n3_history.length > 0 ? sensor.n3_history : ['- Belum ada riwayat tercatat']),
+    '',
+    'B. RIWAYAT DATA GATEWAY (UNTUK ANALISIS EFISIENSI AIR & PEMAKAIAN IRIGASI):',
+    ...(sensor.gateway_history && sensor.gateway_history.length > 0 ? sensor.gateway_history : ['- Belum ada riwayat tercatat']),
+    '==================================================================================',
   ].filter(Boolean).join('\n') : 'Data sensor belum tersedia.';
   const yesterdayLines = yesterdayHistory && typeof yesterdayHistory === 'object'
     ? [
@@ -137,6 +146,8 @@ function buildSystemPrompt(sensor, yesterdayHistory) {
     'PANDUAN KONTEKS PERTANYAAN PENGGUNA:',
     '- Kamu BISA menjawab SEMUA konteks pertanyaan apa pun yang diajukan pengguna: tentang satu node spesifik, perbandingan antar-node, estimasi kebutuhan air, risiko kebakaran gambut, maupun penjelasan umum.',
     '- Jika pengguna meminta "semua data sensor pada node 3" atau data lengkap node 3, sebutkan SEMUA sensor yang ada di Node 3 di atas secara lengkap: Suhu Lapisan Gambut (DS18B20), Suhu Udara Mikro, Kelembapan Udara Mikro, Kadar Air Gambut, Skor FWI, dan Status Bahaya Karhutla.',
+    '- Jika pengguna bertanya tentang PREDIKSI KARHUTLA atau TREN SUHU GAMBUT, BUKTIKAN bahwa kamu membaca banyak data historis dari database Supabase dengan memaparkan deretan riwayat time-series Node 3 di atas (misal: bagaimana Skor FWI bergerak naik atau turun dalam beberapa bacaan terakhir di database).',
+    '- Jika pengguna bertanya tentang EFISIENSI AIR atau PENGGUNAAN AIR, BUKTIKAN bahwa kamu membaca riwayat Gateway dari database Supabase dengan memaparkan total liter air yang mengalir dan debitnya.',
     '- Jika pengguna menanyakan Node 1 atau Node 2, sebutkan Suhu Udara, Kelembapan Udara, dan Kelembapan Tanah bedeng hortikultura.',
     '- Jika pengguna menanyakan Gateway atau Irigasi, sebutkan pH Tanah, Debit Air (Flow Rate), Total Air Tersiram, dan Status Katup.',
     '- Jika pengguna meminta perbandingan atau tren, bandingkan data antar node di atas secara komprehensif.',

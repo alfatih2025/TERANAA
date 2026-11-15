@@ -47,20 +47,42 @@ export default async function handler(req, res) {
       });
     }
 
-    // Selalu ambil data sensor terbaru per node langsung dari Supabase
-    // agar data AI tidak bergantung pada state browser yang mungkin belum update
+    // 1. Ambil data terbaru per node (Node 0, 1, 2, 3)
     const nodeIds = [0, 1, 2, 3];
-    const nodeResults = await Promise.all(
-      nodeIds.map((n) =>
-        supabase
-          .from('sensor_data')
-          .select('*')
-          .eq('node_id', n)
-          .order('id', { ascending: false })
-          .limit(1)
-          .maybeSingle()
-      )
-    );
+    const [nodeResults, n3HistRes, gwHistRes, hortiHistRes] = await Promise.all([
+      Promise.all(
+        nodeIds.map((n) =>
+          supabase
+            .from('sensor_data')
+            .select('*')
+            .eq('node_id', n)
+            .order('id', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+        )
+      ),
+      // 2. Ambil 10 rekaman riwayat Node 3 dari Supabase untuk analisis tren & prediksi Karhutla
+      supabase
+        .from('sensor_data')
+        .select('id, soil_temp, score, temperature, humidity, created_at')
+        .eq('node_id', 3)
+        .order('id', { ascending: false })
+        .limit(10),
+      // 3. Ambil 10 rekaman riwayat Gateway dari Supabase untuk analisis debit & efisiensi air
+      supabase
+        .from('sensor_data')
+        .select('id, flow_rate, total_water, valve_status, created_at')
+        .eq('node_id', 0)
+        .order('id', { ascending: false })
+        .limit(10),
+      // 4. Ambil 10 rekaman riwayat Hortikultura dari Supabase
+      supabase
+        .from('sensor_data')
+        .select('id, node_id, temperature, humidity, soil_moisture, created_at')
+        .in('node_id', [1, 2])
+        .order('id', { ascending: false })
+        .limit(10),
+    ]);
 
     const dbNodes = {};
     nodeIds.forEach((n, idx) => {
@@ -74,12 +96,18 @@ export default async function handler(req, res) {
     const n2 = dbNodes[2] || {};
     const n3 = dbNodes[3] || {};
 
-    // Ambil juga tren riwayat terbaru
-    const { data: recentHistory } = await supabase
-      .from('sensor_data')
-      .select('node_id, temperature, humidity, soil_temp, score, flow_rate, created_at')
-      .order('id', { ascending: false })
-      .limit(20);
+    // Format riwayat time-series Node 3 (Karhutla) dari Supabase
+    const n3History = (n3HistRes?.data || []).map((r) => {
+      const time = r.created_at ? new Date(r.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Jakarta' }) : '-';
+      const tempDisplay = (r.soil_temp != null && r.soil_temp > 70) ? `${r.soil_temp}°C (glitch sensor)` : `${r.soil_temp ?? '-'}°C`;
+      return `[ID ${r.id} @ ${time} WIB] Suhu Gambut: ${tempDisplay}, Skor FWI: ${r.score ?? '-'}, Lembap Udara: ${r.humidity ?? '-'}%`;
+    });
+
+    // Format riwayat time-series Gateway (Irigasi & Efisiensi Air) dari Supabase
+    const gwHistory = (gwHistRes?.data || []).map((r) => {
+      const time = r.created_at ? new Date(r.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Jakarta' }) : '-';
+      return `[ID ${r.id} @ ${time} WIB] Debit Air: ${r.flow_rate ?? 0} L/min, Total Volume Air: ${r.total_water ?? 0} L, Katup: ${r.valve_status ?? 'IDLE'}`;
+    });
 
     // Gabungkan data dari Supabase dengan sensorContext dari frontend
     const enrichedSensorContext = {
@@ -99,6 +127,10 @@ export default async function handler(req, res) {
       flow_rate: n0.flow_rate ?? sensorContext?.flow_rate ?? null,
       total_water: n0.total_water ?? sensorContext?.total_water ?? null,
       valve_status: n0.valve_status ?? sensorContext?.valve_status ?? null,
+
+      // Riwayat time-series langsung dari Supabase
+      n3_history: n3History,
+      gateway_history: gwHistory,
 
       // Detail lengkap per node (semua parameter sensor)
       node1: n1.id ? { 

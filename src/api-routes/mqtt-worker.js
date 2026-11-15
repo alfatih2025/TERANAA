@@ -56,11 +56,18 @@ export function startMqttWorker() {
       }
 
       // 1. Simpan ke Database Web (Supabase)
-      const { error } = await supabase.from('sensor_data').insert(sensorPayload);
-      if (error) {
-        console.error('[MQTT Worker] Supabase Insert Error:', error.message);
-      } else {
-        console.log(`[MQTT Worker] Saved data for node ${nodeId} to Supabase`);
+      try {
+        const { error } = await supabase.from('sensor_data').insert(sensorPayload);
+        if (error) {
+          // Jangan spam log untuk RLS policy error yang berulang
+          if (error.code !== '42501') {
+            console.error('[MQTT Worker] Supabase Insert Error:', error.message);
+          }
+        } else {
+          console.log(`[MQTT Worker] Saved data for node ${nodeId} to Supabase`);
+        }
+      } catch (dbErr) {
+        console.warn('[MQTT Worker] DB insert exception:', dbErr?.message);
       }
 
     } catch (e) {

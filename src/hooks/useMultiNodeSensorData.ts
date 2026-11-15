@@ -72,7 +72,7 @@ function snapshotToNodeData(snap: MqttSensorSnapshot): NodeSensorData | null {
   };
 }
 
-/** Bandingkan nilai sensor (tanpa timestamp) */
+/** Bandingkan nilai sensor (termasuk timestamp pembaruan) */
 function isSameValues(a: NodeSensorData | null, b: NodeSensorData | null): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
@@ -83,14 +83,27 @@ function isSameValues(a: NodeSensorData | null, b: NodeSensorData | null): boole
     a.soil_moisture === b.soil_moisture &&
     a.soil_temp === b.soil_temp &&
     a.fwi === b.fwi &&
-    a.fwi_level === b.fwi_level
+    a.fwi_level === b.fwi_level &&
+    a.created_at === b.created_at
   );
 }
 
+function loadInitialNode(nodeId: number): NodeSensorData | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(`teranova_node_${nodeId}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return normalizeNodeData(parsed);
+    }
+  } catch {}
+  return null;
+}
+
 export function useMultiNodeSensorData() {
-  const [node1, setNode1] = useState<NodeSensorData | null>(null);
-  const [node2, setNode2] = useState<NodeSensorData | null>(null);
-  const [node3, setNode3] = useState<NodeSensorData | null>(null);
+  const [node1, setNode1] = useState<NodeSensorData | null>(() => loadInitialNode(1));
+  const [node2, setNode2] = useState<NodeSensorData | null>(() => loadInitialNode(2));
+  const [node3, setNode3] = useState<NodeSensorData | null>(() => loadInitialNode(3));
   const [loading, setLoading] = useState(true);
 
   // Ref untuk perbandingan cepat tanpa re-render
@@ -99,6 +112,10 @@ export function useMultiNodeSensorData() {
   const node3Ref = useRef<NodeSensorData | null>(null);
 
   const applyNodeData = useCallback((next: NodeSensorData) => {
+    try {
+      localStorage.setItem(`teranova_node_${next.node_id}`, JSON.stringify(next));
+    } catch {}
+
     if (next.node_id === 1) {
       if (isSameValues(node1Ref.current, next)) return;
       node1Ref.current = next;

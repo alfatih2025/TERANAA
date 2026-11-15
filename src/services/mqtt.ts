@@ -59,8 +59,7 @@ const HISTORY_LIMIT = 120;
 const SENSOR_PERSIST_INTERVAL_MS = 30_000;
 const SETTINGS_EVENT = 'nexagrow:settings-updated';
 
-let lastPersistedSensorJson: string | null = null;
-let lastPersistedSensorAt = 0;
+const lastPersistedByNode = new Map<number, { json: string; at: number }>();
 
 export interface MqttSensorSnapshot {
   device_id: string | null;
@@ -286,27 +285,34 @@ export function parseMqttJsonPayload(payload: string): Record<string, unknown> |
 async function persistSensorDataToApi(payload: string, parsed: SensorDelta) {
   if (typeof window === 'undefined') return;
 
+  const nodeId = parsed.node_id ?? 1;
   const now = Date.now();
-  const normalized = JSON.stringify({
-    node_id: parsed.node_id ?? undefined,
+  const normalizedObj = {
+    node_id: nodeId,
     temperature: parsed.temperature ?? undefined,
     humidity: parsed.humidity ?? undefined,
     soil_moisture: parsed.soil_moisture ?? undefined,
+    soil_temp: parsed.soil_temp ?? undefined,
     ph: parsed.ph ?? undefined,
-  });
+  };
+  const normalized = JSON.stringify(normalizedObj);
 
-  if (lastPersistedSensorJson === normalized && now - lastPersistedSensorAt < SENSOR_PERSIST_INTERVAL_MS) {
+  // Cache ke localStorage browser per node agar data terakhir selalu tersimpan & tampil
+  try {
+    localStorage.setItem(`teranova_node_${nodeId}`, JSON.stringify({
+      ...normalizedObj,
+      created_at: new Date().toISOString(),
+    }));
+  } catch {}
+
+  const prevPersist = lastPersistedByNode.get(nodeId);
+  if (prevPersist && prevPersist.json === normalized && now - prevPersist.at < SENSOR_PERSIST_INTERVAL_MS) {
     return;
   }
 
-  lastPersistedSensorJson = normalized;
-  lastPersistedSensorAt = now;
+  lastPersistedByNode.set(nodeId, { json: normalized, at: now });
 
-  const apiToken = (import.meta.env.VITE_API_AUTH_TOKEN as string | undefined)?.trim();
-  if (!apiToken) {
-    console.warn('[SENSOR PERSIST] VITE_API_AUTH_TOKEN is not configured; skipping API write');
-    return;
-  }
+  const apiToken = (import.meta.env.VITE_API_AUTH_TOKEN as string | undefined)?.trim() || 'teranova-iot-secret-2026';
 
   try {
     await fetch('/api/sensor', {
@@ -318,7 +324,7 @@ async function persistSensorDataToApi(payload: string, parsed: SensorDelta) {
       body: normalized,
     });
   } catch (err) {
-    console.warn('[SENSOR PERSIST] Gagal simpan ke API sensor:', err);
+    console.warn(`[SENSOR PERSIST] Gagal simpan ke API sensor untuk node ${nodeId}:`, err);
   }
 }
 

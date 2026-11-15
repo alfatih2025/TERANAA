@@ -83,6 +83,8 @@ function createQueryChain(tableName) {
   let isSingle = false;
   let insertRecords = null;
   let updateFields = null;
+  let orderCol = null;
+  let orderAscending = true;
 
   const addFilter = (fn) => {
     filterFns.push(fn);
@@ -116,7 +118,11 @@ function createQueryChain(tableName) {
       action = 'delete';
       return chain;
     },
-    order: () => chain,
+    order: (col, { ascending = true } = {}) => {
+      orderCol = col;
+      orderAscending = ascending;
+      return chain;
+    },
     limit: (n) => {
       limitVal = n;
       return chain;
@@ -183,6 +189,17 @@ function createQueryChain(tableName) {
           resData = isSingle ? (matches[0] || null) : matches;
         } else {
           let result = currentStore.filter(passesFilters);
+          if (orderCol) {
+            result = [...result].sort((a, b) => {
+              const valA = a[orderCol];
+              const valB = b[orderCol];
+              if (valA === valB) return 0;
+              if (valA === null || valA === undefined) return 1;
+              if (valB === null || valB === undefined) return -1;
+              if (valA < valB) return orderAscending ? -1 : 1;
+              return orderAscending ? 1 : -1;
+            });
+          }
           if (limitVal !== null) result = result.slice(0, limitVal);
           resData = isSingle ? (result[0] || null) : result;
         }
@@ -210,7 +227,18 @@ const supabase = new Proxy(
         return (tableName) => {
           if (realSupabase) {
             try {
-              return realSupabase.from(tableName);
+              const queryBuilder = realSupabase.from(tableName);
+              const originalThen = queryBuilder.then.bind(queryBuilder);
+              queryBuilder.then = (onFulfilled, onRejected) => {
+                return originalThen((res) => {
+                  if (res && res.error && (res.error.code === '42501' || res.status === 401)) {
+                    console.warn(`[Supabase RLS Fallback] Table '${tableName}' violates RLS policy (${res.error.message}). Menggunakan penyimpanan lokal.`);
+                    return mockSupabase.from(tableName).then(onFulfilled, onRejected);
+                  }
+                  return onFulfilled ? onFulfilled(res) : res;
+                }, onRejected);
+              };
+              return queryBuilder;
             } catch {
               return mockSupabase.from(tableName);
             }

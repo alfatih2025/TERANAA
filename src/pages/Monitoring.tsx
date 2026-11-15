@@ -16,7 +16,25 @@ export function Monitoring() {
       const res = await fetch(`/api/sensor?node_id=${nodeId}&limit=60`);
       if (res.ok) {
         const data = await res.json();
-        setHistory(data);
+        if (Array.isArray(data) && data.length > 0) {
+          setHistory(data);
+        } else {
+          try {
+            const raw = localStorage.getItem(`teranova_node_${nodeId}`);
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (parsed && typeof parsed === 'object') {
+                setHistory([parsed]);
+              } else {
+                setHistory([]);
+              }
+            } else {
+              setHistory([]);
+            }
+          } catch {
+            setHistory([]);
+          }
+        }
       }
     } catch (e) {
       console.error(e);

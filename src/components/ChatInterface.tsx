@@ -23,19 +23,40 @@ interface ChatInterfaceProps {
   variant?: 'full' | 'compact';
 }
 
-function renderInlineText(text: string) {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g).filter(Boolean);
+function renderInlineText(text: string): ReactNode {
+  if (!text) return null;
+
+  // Tokenize bold (**text**), inline code (`code`), and badge [ID ...] or [... WIB]
+  const regex = /(\*\*[^*]+\*\*|`[^`]+`|\[(?:ID\s*\d+|[^\]]+WIB)\])/g;
+  const parts = text.split(regex).filter(Boolean);
 
   return parts.map((part, index) => {
+    // Bold
     if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
       return (
-        <strong key={`${index}-${part}`} className="font-semibold text-slate-900 dark:text-slate-100">
+        <strong key={index} className="font-semibold text-slate-900 dark:text-emerald-300">
           {part.slice(2, -2)}
         </strong>
       );
     }
+    // Inline code
+    if (part.startsWith('`') && part.endsWith('`') && part.length > 2) {
+      return (
+        <code key={index} className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-emerald-800 border border-slate-200/80 dark:bg-slate-800 dark:text-emerald-300 dark:border-slate-700/60">
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+    // Badge [ID ...] or [... WIB]
+    if (part.startsWith('[') && part.endsWith(']')) {
+      return (
+        <span key={index} className="inline-flex items-center rounded-md bg-emerald-50 px-1.5 py-0.5 font-mono text-[11px] font-bold text-emerald-700 border border-emerald-200 dark:bg-emerald-950/70 dark:text-emerald-300 dark:border-emerald-800/60 shadow-xs mr-1">
+          {part.slice(1, -1)}
+        </span>
+      );
+    }
 
-    return <span key={`${index}-${part}`}>{part}</span>;
+    return <span key={index}>{part}</span>;
   });
 }
 
@@ -48,7 +69,7 @@ function renderAssistantMessage(content: string) {
   const flushList = () => {
     if (!currentList.length || !listType) return;
     blocks.push(
-      <div key={`list-${blocks.length}`} className="space-y-1">
+      <div key={`list-${blocks.length}`} className="space-y-1.5 my-1">
         {currentList}
       </div>,
     );
@@ -61,15 +82,15 @@ function renderAssistantMessage(content: string) {
 
     if (!trimmed) {
       flushList();
-      blocks.push(<div key={`spacer-${lineIndex}`} className="h-1" />);
+      blocks.push(<div key={`spacer-${lineIndex}`} className="h-1.5" />);
       return;
     }
 
     if (trimmed.startsWith('## ')) {
       flushList();
       blocks.push(
-        <h4 key={`h2-${lineIndex}`} className="text-sm font-semibold uppercase tracking-wide text-green-700">
-          {trimmed.slice(3)}
+        <h4 key={`h2-${lineIndex}`} className="mt-2.5 mb-1 text-sm font-bold tracking-wide text-emerald-600 dark:text-emerald-400">
+          {renderInlineText(trimmed.slice(3))}
         </h4>,
       );
       return;
@@ -78,27 +99,40 @@ function renderAssistantMessage(content: string) {
     if (trimmed.startsWith('### ')) {
       flushList();
       blocks.push(
-        <h5 key={`h3-${lineIndex}`} className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-          {trimmed.slice(4)}
+        <h5 key={`h3-${lineIndex}`} className="mt-2 mb-0.5 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+          {renderInlineText(trimmed.slice(4))}
         </h5>,
       );
       return;
     }
 
-    if (/^[-*]\s+/.test(trimmed)) {
+    // List item (- or * or •)
+    if (/^[-*•]\s+/.test(trimmed)) {
       if (listType !== 'ul') {
         flushList();
         listType = 'ul';
       }
-      currentList.push(
-        <div key={`ul-${lineIndex}`} className="flex gap-2 text-sm leading-6 text-slate-700 dark:text-gray-300">
-          <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-green-500" />
-          <span>{renderInlineText(trimmed.replace(/^[-*]\s+/, ''))}</span>
-        </div>,
-      );
+      const rawText = trimmed.replace(/^[-*•]\s+/, '');
+      const isRecordRow = rawText.includes('[ID') || rawText.includes('WIB');
+
+      if (isRecordRow) {
+        currentList.push(
+          <div key={`rec-${lineIndex}`} className="rounded-xl border border-slate-200/80 bg-slate-50/70 p-2.5 text-xs leading-relaxed text-slate-700 shadow-xs transition hover:border-emerald-300 dark:border-slate-800/80 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:border-emerald-500/30">
+            {renderInlineText(rawText)}
+          </div>,
+        );
+      } else {
+        currentList.push(
+          <div key={`ul-${lineIndex}`} className="flex items-start gap-2 text-sm leading-relaxed text-slate-700 dark:text-slate-200">
+            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500 shadow-xs" />
+            <span className="flex-1">{renderInlineText(rawText)}</span>
+          </div>,
+        );
+      }
       return;
     }
 
+    // Numbered list
     if (/^\d+[.)]\s+/.test(trimmed)) {
       if (listType !== 'ol') {
         flushList();
@@ -107,11 +141,11 @@ function renderAssistantMessage(content: string) {
       const number = trimmed.match(/^(\d+[.)])\s+/)?.[1] ?? '';
       const text = trimmed.replace(/^\d+[.)]\s+/, '');
       currentList.push(
-        <div key={`ol-${lineIndex}`} className="flex gap-2 text-sm leading-6 text-slate-700 dark:text-gray-300">
-          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-slate-100 px-1 text-[11px] font-semibold text-slate-600 dark:bg-[#111827] dark:text-slate-300">
+        <div key={`ol-${lineIndex}`} className="flex items-start gap-2.5 text-sm leading-relaxed text-slate-700 dark:text-slate-200">
+          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-100 text-[11px] font-bold text-emerald-700 dark:bg-emerald-950/80 dark:text-emerald-300">
             {number.replace(/[.)]/g, '')}
           </span>
-          <span>{renderInlineText(text)}</span>
+          <span className="flex-1">{renderInlineText(text)}</span>
         </div>,
       );
       return;
@@ -119,28 +153,16 @@ function renderAssistantMessage(content: string) {
 
     flushList();
 
-    const isKeyValue = trimmed.includes(':') && trimmed.length < 120;
-    if (isKeyValue) {
-      const [label, ...rest] = trimmed.split(':');
-      const value = rest.join(':').trim();
-      blocks.push(
-        <div key={`kv-${lineIndex}`} className="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 dark:border-gray-800">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">{label.trim()}</div>
-          <div className="mt-1 text-sm text-slate-900 dark:text-slate-100">{renderInlineText(value || '-')}</div>
-        </div>,
-      );
-      return;
-    }
-
+    // Standard paragraph with dark mode typography
     blocks.push(
-      <p key={`p-${lineIndex}`} className="text-sm leading-6 text-slate-700 dark:text-gray-300">
+      <p key={`p-${lineIndex}`} className="text-sm leading-relaxed text-slate-700 dark:text-slate-200">
         {renderInlineText(trimmed)}
       </p>,
     );
   });
 
   flushList();
-  return <div className="space-y-2">{blocks}</div>;
+  return <div className="space-y-1.5">{blocks}</div>;
 }
 
 import { AiAnalysisView } from './AiAnalysisView';
@@ -473,8 +495,10 @@ export function ChatInterface({ sensorData = null, settings = null, weatherData 
                   className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
                   <div
-                    className={`group relative max-w-[80%] rounded-2xl px-4 py-3 text-sm shadow-sm ${
-                      message.role === 'user' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-800 dark:bg-slate-800 dark:text-gray-100'
+                    className={`group relative max-w-[85%] sm:max-w-[80%] rounded-2xl px-4 py-3.5 text-sm shadow-sm transition-all ${
+                      message.role === 'user'
+                        ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-br-xs shadow-md'
+                        : 'border border-slate-200/90 bg-white text-slate-800 rounded-bl-xs shadow-xs dark:border-slate-800/90 dark:bg-slate-900/95 dark:text-slate-100'
                     }`}
                   >
                     {message.role === 'user' ? (

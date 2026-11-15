@@ -261,7 +261,7 @@ function App() {
       case 'chat':
         return <ChatPage sensorData={liveSensorData} settings={settings} weatherData={weatherData} />;
       case 'control':
-        return <ControlPage sensorData={liveSensorData} />;
+        return <ControlPage />;
       case 'weather':
         return <WeatherPage locationCode={settings?.location} settings={settings} updateSettings={updateSettings} />;
       case 'logs':

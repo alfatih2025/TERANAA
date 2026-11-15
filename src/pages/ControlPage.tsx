@@ -3,13 +3,8 @@ import { Zap, History } from 'lucide-react';
 import { useControl } from '../hooks/useControl';
 import { useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { SensorData } from '../hooks/useSensorData';
 
-interface ControlPageProps {
-  sensorData: SensorData | null;
-}
-
-export function ControlPage({ sensorData }: ControlPageProps) {
+export function ControlPage() {
   const { logs, fetchLogs } = useControl();
 
   useEffect(() => {
@@ -27,7 +22,7 @@ export function ControlPage({ sensorData }: ControlPageProps) {
         </div>
       </div>
 
-      <ControlPanel sensorData={sensorData} />
+      <ControlPanel />
 
       <motion.div
         initial={{ opacity: 0, y: 20 }}

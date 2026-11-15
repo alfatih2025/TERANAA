@@ -187,8 +187,8 @@ export function WeatherMotionForecast({ data, loading, error, locationLabel }: W
         )}
 
         {error && (
-          <div className="mt-4 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-            <AlertCircle size={18} className="mt-0.5 shrink-0" />
+          <div role="alert" className="mt-4 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-400/50 dark:bg-amber-950/80 dark:text-amber-50">
+            <AlertCircle size={18} className="mt-0.5 shrink-0 text-amber-700 dark:text-amber-200" />
             <p>{error}</p>
           </div>
         )}

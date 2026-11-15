@@ -374,7 +374,11 @@ export function SettingsPage() {
             <button onClick={handleSendWifi} disabled={wifiStatus === 'sending' || controlLoading || !isAdmin} className="w-full rounded-xl bg-green-600 px-4 py-3 font-semibold text-white disabled:opacity-50">
               {wifiStatus === 'sending' ? 'Mengirim...' : 'Kirim ke ESP32'}
             </button>
-            {wifiError && <p className="text-sm text-red-600">{wifiError}</p>}
+            {wifiError && (
+              <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-800 dark:border-red-400/50 dark:bg-red-950/80 dark:text-red-50">
+                {wifiError}
+              </p>
+            )}
           </div>
         </motion.div>
 
@@ -403,10 +407,10 @@ export function SettingsPage() {
       <div className="flex items-center justify-between">
         <div className="text-sm">
           {saveStatus === 'saved' && !syncError && (
-            <span className="text-gray-600 dark:text-gray-300">Pengaturan tersimpan &amp; berhasil dikirim ke ESP32.</span>
+            <span role="status" className="text-gray-700 dark:text-gray-100">Pengaturan tersimpan &amp; berhasil dikirim ke ESP32.</span>
           )}
           {saveStatus === 'saved' && syncError && (
-            <span className="text-amber-600">{syncError}</span>
+            <span role="alert" className="inline-block rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 font-medium text-amber-950 dark:border-amber-400/50 dark:bg-amber-950/80 dark:text-amber-50">{syncError}</span>
           )}
         </div>
         <button onClick={handleSave} disabled={!isAdmin} className={`rounded-xl px-6 py-3 font-semibold shadow-sm ${!isAdmin ? "bg-slate-300 text-slate-500 cursor-not-allowed" : "bg-green-600 text-white hover:bg-green-700"}`} >

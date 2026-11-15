@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { getMqttClient, publishMqtt, publishMqttWithAck, parseMqttJsonPayload, syncLocalControlState } from '../services/mqtt';
+import { getMqttClient, publishMqtt, publishMqttWithAck, syncLocalControlState } from '../services/mqtt';
 
 export interface ControlLog {
   id: number;
@@ -21,6 +21,45 @@ export interface SendCommandResult {
 }
 
 const STORAGE_KEY = 'nexagrow-control-logs';
+const TOPIC_ACTUATOR_STATUS = 'sproutai/actuator/status';
+const TOPIC_POMPA_STATUS = 'sproutai/pompa/status';
+const TOPIC_MODE_STATUS = 'sproutai/mode/status';
+
+interface MqttCommand {
+  topic: string;
+  payload: string;
+  acknowledgement?: {
+    topic: string;
+    matches: (topic: string, payload: string) => boolean;
+  };
+}
+
+function parseActuatorPayload(payload: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(payload);
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function actuatorMatches(field: 'irigasi' | 'fertigasi', expected: boolean) {
+  return (topic: string, payload: string) => {
+    if (topic !== TOPIC_ACTUATOR_STATUS) return false;
+    const status = parseActuatorPayload(payload)?.[field];
+    return status === expected || status === (expected ? 'true' : 'false') || status === (expected ? 1 : 0);
+  };
+}
+
+function modeMatches(expected: 'AUTO' | 'MANUAL') {
+  return (topic: string, payload: string) => {
+    if (topic !== TOPIC_MODE_STATUS) return false;
+    const normalized = payload.trim().toUpperCase();
+    return expected === 'AUTO'
+      ? normalized === 'AUTO' || normalized === 'OTOMATIS'
+      : normalized === 'MANUAL';
+  };
+}
 
 function readStoredLogs(): ControlLog[] {
   if (typeof window === 'undefined') return [];
@@ -50,12 +89,50 @@ function createLog(action: string, device: string, duration: number | null, stat
   };
 }
 
-function resolveControlCommand(action: string, duration?: number, data?: Record<string, any>) {
+function resolveControlCommand(action: string, duration?: number, data?: Record<string, any>): MqttCommand | null {
   switch (action) {
     case 'pump_on':
-      return { topic: 'sproutai/pompa/cmd', payload: 'ON' };
+      return {
+        topic: 'sproutai/pompa/cmd',
+        payload: 'ON',
+        acknowledgement: {
+          topic: TOPIC_POMPA_STATUS,
+          matches: (topic, payload) => topic === TOPIC_POMPA_STATUS && payload.trim().toUpperCase() === 'ON',
+        },
+      };
     case 'pump_off':
-      return { topic: 'sproutai/pompa/cmd', payload: 'OFF' };
+      return {
+        topic: 'sproutai/pompa/cmd',
+        payload: 'OFF',
+        acknowledgement: {
+          topic: TOPIC_POMPA_STATUS,
+          matches: (topic, payload) => topic === TOPIC_POMPA_STATUS && payload.trim().toUpperCase() === 'OFF',
+        },
+      };
+    case 'irrigation_on':
+      return {
+        topic: 'sproutai/irigasi/cmd',
+        payload: 'ON',
+        acknowledgement: { topic: TOPIC_ACTUATOR_STATUS, matches: actuatorMatches('irigasi', true) },
+      };
+    case 'irrigation_off':
+      return {
+        topic: 'sproutai/irigasi/cmd',
+        payload: 'OFF',
+        acknowledgement: { topic: TOPIC_ACTUATOR_STATUS, matches: actuatorMatches('irigasi', false) },
+      };
+    case 'fertigation_on':
+      return {
+        topic: 'sproutai/fertigasi/cmd',
+        payload: 'ON',
+        acknowledgement: { topic: TOPIC_ACTUATOR_STATUS, matches: actuatorMatches('fertigasi', true) },
+      };
+    case 'fertigation_off':
+      return {
+        topic: 'sproutai/fertigasi/cmd',
+        payload: 'OFF',
+        acknowledgement: { topic: TOPIC_ACTUATOR_STATUS, matches: actuatorMatches('fertigasi', false) },
+      };
     case 'pump_10s':
       return {
         topic: 'sproutai/ai/action',
@@ -66,9 +143,17 @@ function resolveControlCommand(action: string, duration?: number, data?: Record<
       };
     // Kasus led_on dan led_off dihapus karena LED dikontrol ESP32 secara hardware
     case 'mode_auto':
-      return { topic: 'sproutai/mode/cmd', payload: 'AUTO' };
+      return {
+        topic: 'sproutai/mode/cmd',
+        payload: 'AUTO',
+        acknowledgement: { topic: TOPIC_MODE_STATUS, matches: modeMatches('AUTO') },
+      };
     case 'mode_manual':
-      return { topic: 'sproutai/mode/cmd', payload: 'MANUAL' };
+      return {
+        topic: 'sproutai/mode/cmd',
+        payload: 'MANUAL',
+        acknowledgement: { topic: TOPIC_MODE_STATUS, matches: modeMatches('MANUAL') },
+      };
     case 'settings_sync': {
       const phaseValue = String(data?.plant_phase ?? '').trim().toLowerCase() === 'generatif' ? 1 : 0;
       const autoModeValue = typeof data?.auto_mode === 'string'
@@ -218,7 +303,16 @@ export function useControl() {
         });
       }
 
-      if (action === 'settings_sync' || action === 'schedule_set') {
+      if (mqttCommand.acknowledgement) {
+        await publishMqttWithAck(
+          mqttCommand.topic,
+          mqttCommand.payload,
+          mqttCommand.acknowledgement.topic,
+          mqttCommand.acknowledgement.matches,
+          12_000,
+          { retain: false, qos: 1 },
+        );
+      } else if (action === 'settings_sync' || action === 'schedule_set') {
         await publishMqtt(mqttCommand.topic, mqttCommand.payload, {
           retain: false,
           qos: 1,
@@ -231,12 +325,12 @@ export function useControl() {
       }
 
       syncLocalControlState(action, duration, data);
-      pushLog(createLog(action, 'ESP32_001', duration ?? null, 'completed'));
+      pushLog(createLog(action, 'ESP32_Gateway', duration ?? null, 'completed'));
       return { success: true };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       setError(message);
-      pushLog(createLog(action, 'ESP32_001', duration ?? null, 'failed'));
+      pushLog(createLog(action, 'ESP32_Gateway', duration ?? null, 'failed'));
       return { success: false, error: message };
     } finally {
       setLoading(false);

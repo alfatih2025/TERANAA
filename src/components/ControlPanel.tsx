@@ -1,133 +1,238 @@
 import { useState } from 'react';
-import { motion } from 'framer-motion';
-import { Timer, Droplets } from 'lucide-react';
+import { Bot, CirclePower, Droplets, FlaskConical, Hand, Radio, ShieldCheck } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useControl } from '../hooks/useControl';
-import { SensorData } from '../hooks/useSensorData';
-import { useAuth } from '../hooks/useAuthContext';
-import { AlertCircle } from 'lucide-react';
+import { useMqttStatus } from '../hooks/useMqttStatus';
 
-interface ControlPanelProps {
-  sensorData: SensorData | null;
+type Feedback = { tone: 'success' | 'error'; message: string } | null;
+
+interface CommandButtonProps {
+  label: string;
+  icon: LucideIcon;
+  variant: 'on' | 'off';
+  onClick: () => void;
+  disabled: boolean;
+  pressed?: boolean;
 }
 
-// getAutoControlDetails removed; logic implemented inside component to use runtime refs
+function CommandButton({ label, icon: Icon, variant, onClick, disabled, pressed }: CommandButtonProps) {
+  const style = variant === 'on'
+    ? 'border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700'
+    : 'border-rose-200 bg-white text-rose-700 hover:border-rose-300 hover:bg-rose-50 dark:border-rose-400/30 dark:bg-slate-900 dark:text-rose-300 dark:hover:bg-rose-500/10';
 
-export function ControlPanel({ sensorData }: ControlPanelProps) {
-  const { currentUser } = useAuth();
-  const isAdmin = currentUser?.role === "admin";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-pressed={pressed}
+      className={`inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus-visible:ring-offset-slate-900 ${style}`}
+    >
+      <Icon aria-hidden="true" size={18} />
+      {label}
+    </button>
+  );
+}
+
+interface ActuatorCardProps {
+  title: string;
+  description: string;
+  icon: LucideIcon;
+  active: boolean | null;
+  onTurnOn: () => void;
+  onTurnOff: () => void;
+  controlsLocked: boolean;
+  loading: boolean;
+}
+
+function ActuatorCard({
+  title,
+  description,
+  icon: Icon,
+  active,
+  onTurnOn,
+  onTurnOff,
+  controlsLocked,
+  loading,
+}: ActuatorCardProps) {
+  const isActive = active === true;
+  const isInactive = active === false;
+  const statusText = isActive ? 'Menyala' : isInactive ? 'Mati' : 'Menunggu status';
+  const statusStyle = isActive
+    ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-200'
+    : isInactive
+      ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+      : 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-200';
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-slate-50/80 p-5 dark:border-slate-700 dark:bg-slate-800/40" aria-label={`Kontrol ${title}`}>
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="rounded-xl bg-emerald-100 p-2.5 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
+            <Icon aria-hidden="true" size={22} />
+          </div>
+          <div>
+            <h4 className="font-semibold text-slate-900 dark:text-slate-100">{title}</h4>
+            <p className="mt-1 text-sm leading-5 text-slate-600 dark:text-slate-400">{description}</p>
+          </div>
+        </div>
+        <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${statusStyle}`} aria-live="polite">
+          {statusText}
+        </span>
+      </div>
+
+      <div className="mt-5 flex gap-3">
+        <CommandButton
+          label="ON"
+          icon={CirclePower}
+          variant="on"
+          onClick={onTurnOn}
+          disabled={controlsLocked || loading || isActive}
+          pressed={isActive}
+        />
+        <CommandButton
+          label="OFF"
+          icon={CirclePower}
+          variant="off"
+          onClick={onTurnOff}
+          disabled={controlsLocked || loading || isInactive}
+          pressed={isInactive}
+        />
+      </div>
+    </section>
+  );
+}
+
+export function ControlPanel() {
   const { sendCommand, loading } = useControl();
+  const { actuatorSnapshot, espOnline } = useMqttStatus();
+  const [feedback, setFeedback] = useState<Feedback>(null);
 
-  const handleCommand = async (action: string, duration?: number, data?: Record<string, any>) => {
-    try {
-      await sendCommand(action, duration, data);
-    } catch (err) {
-      console.error('Command failed:', err);
-    }
-  };
+  const mode = actuatorSnapshot?.mode ?? null;
+  const manualMode = mode === 'manual';
+  const controlsLocked = !manualMode;
 
-  // Web no longer issues automatic pump_on/pump_off — Arduino handles `controlPompa()`.
-
-  function ControlButton({
-    onClick,
-    icon: Icon,
-    label,
-    variant = 'primary',
-    disabled = false,
-  }: {
-    onClick: () => void;
-    icon: LucideIcon;
-    label: string;
-    variant?: 'primary' | 'danger' | 'warning' | 'success';
-    disabled?: boolean;
-  }) {
-    const variants = {
-      primary: 'bg-green-600 hover:bg-green-700 shadow-green-200',
-      danger: 'bg-red-500 hover:bg-red-600 shadow-red-200',
-      warning: 'bg-amber-500 hover:bg-amber-600 shadow-amber-200',
-      success: 'bg-slate-700 hover:bg-slate-800 shadow-slate-200',
-    } as const;
-
-    return (
-      <motion.button
-        whileHover={{ scale: disabled ? 1 : 1.03 }}
-        whileTap={{ scale: disabled ? 1 : 0.97 }}
-        onClick={onClick}
-        disabled={disabled || loading}
-        className={`${variants[variant]} ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
-          flex w-full items-center gap-3 rounded-2xl px-5 py-4 font-medium text-white shadow-lg transition-all`}
-      >
-        <Icon size={20} />
-        <span>{label}</span>
-        {loading && <motion.div className="ml-auto h-5 w-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />}
-      </motion.button>
+  const sendGatewayCommand = async (action: string, successMessage: string) => {
+    setFeedback(null);
+    const result = await sendCommand(action);
+    setFeedback(
+      result.success
+        ? { tone: 'success', message: successMessage }
+        : { tone: 'error', message: result.error ?? 'Gateway belum mengonfirmasi perintah.' },
     );
   };
 
+  const modeLabel = mode === 'manual' ? 'Manual' : mode === 'auto' ? 'Otomatis' : 'Belum tersinkron';
+  const modeDescription = mode === 'manual'
+    ? 'Anda mengendalikan katup irigasi dan fertigasi secara langsung.'
+    : mode === 'auto'
+      ? 'ESP32 Gateway mengatur aktuator berdasarkan data sensor dan aturan otomatisasi.'
+      : 'Pilih mode untuk meminta status terbaru dari ESP32 Gateway.';
+
   return (
     <div className="space-y-6">
-      <div className="rounded-3xl border border-slate-200 bg-white light-card p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="mb-6 flex items-center justify-between gap-4">
-          <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Mode Operasi</h3>
-          <div className="rounded-2xl bg-slate-100 px-4 py-2 text-sm font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-            Gateway Sensor
-          </div>
-        </div>
-
-        <div className="rounded-2xl border-2 border-slate-200 bg-slate-100 p-4 dark:border-slate-800 dark:bg-slate-800/60">
-          <div className="flex items-center gap-3">
-            <div className="rounded-2xl bg-slate-200 p-3 text-slate-600 dark:bg-slate-700 dark:text-slate-300">
-              <Droplets size={24} />
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900" aria-labelledby="gateway-mode-title">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="rounded-2xl bg-emerald-100 p-3 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
+              <Radio aria-hidden="true" size={24} />
             </div>
             <div>
-              <p className="text-sm text-slate-600 dark:text-slate-400">Node Terhubung</p>
-              <p className="text-lg font-bold text-slate-700 dark:text-slate-100">
-                {sensorData?.node_id ?? 'N/A'}
-              </p>
+              <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Pengendali aktuator</p>
+              <h3 id="gateway-mode-title" className="text-lg font-semibold text-slate-900 dark:text-slate-100">ESP32 Gateway</h3>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{modeDescription}</p>
+            </div>
+          </div>
+          <span className={`inline-flex w-fit items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ${espOnline ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-200' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
+            <span className={`h-2 w-2 rounded-full ${espOnline ? 'bg-emerald-500' : 'bg-slate-400'}`} aria-hidden="true" />
+            {espOnline ? 'Gateway terhubung' : 'Menunggu Gateway'}
+          </span>
+        </div>
+
+        <div className="mt-6 border-t border-slate-200 pt-5 dark:border-slate-800">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h4 className="font-semibold text-slate-900 dark:text-slate-100">Mode operasi</h4>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">Mode aktif: <span className="font-semibold">{modeLabel}</span></p>
+            </div>
+            <div className="inline-flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800" role="group" aria-label="Pilih mode operasi Gateway">
+              <button
+                type="button"
+                onClick={() => sendGatewayCommand('mode_manual', 'Mode Manual aktif. Anda dapat mengontrol aktuator.')}
+                disabled={loading || manualMode}
+                aria-pressed={manualMode}
+                className={`inline-flex min-h-11 items-center gap-2 rounded-lg px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60 ${manualMode ? 'bg-white text-emerald-700 shadow-sm dark:bg-slate-700 dark:text-emerald-300' : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'}`}
+              >
+                <Hand aria-hidden="true" size={17} />
+                Manual
+              </button>
+              <button
+                type="button"
+                onClick={() => sendGatewayCommand('mode_auto', 'Mode Otomatis aktif. Gateway kembali mengatur aktuator.')}
+                disabled={loading || mode === 'auto'}
+                aria-pressed={mode === 'auto'}
+                className={`inline-flex min-h-11 items-center gap-2 rounded-lg px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60 ${mode === 'auto' ? 'bg-white text-emerald-700 shadow-sm dark:bg-slate-700 dark:text-emerald-300' : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'}`}
+              >
+                <Bot aria-hidden="true" size={17} />
+                Otomatis
+              </button>
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      <div className="rounded-3xl border border-slate-200 bg-white light-card p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="flex items-center gap-3 mb-4">
-          <Timer className="w-5 h-5 text-green-600 dark:text-green-400" />
-          <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Kontrol Gateway</h3>
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900" aria-labelledby="actuator-control-title">
+        <div className="flex items-start gap-3">
+          <div className="rounded-2xl bg-cyan-100 p-3 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-300">
+            <ShieldCheck aria-hidden="true" size={24} />
+          </div>
+          <div>
+            <h3 id="actuator-control-title" className="text-lg font-semibold text-slate-900 dark:text-slate-100">Kontrol irigasi &amp; fertigasi</h3>
+            <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+              Tombol tersedia saat mode Manual. Setiap perintah menunggu konfirmasi status dari ESP32 Gateway.
+            </p>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <ControlButton
-            onClick={() => handleCommand('pump_on')}
-            icon={Timer}
-            label="Pompa ON"
-            variant="success"
+        {!manualMode && (
+          <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100" role="status">
+            Pilih <strong>Manual</strong> untuk mengaktifkan tombol ON dan OFF agar otomatisasi Gateway tidak berbenturan dengan kontrol langsung.
+          </div>
+        )}
+
+        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          <ActuatorCard
+            title="Irigasi"
+            description="Membuka atau menutup jalur air irigasi."
+            icon={Droplets}
+            active={actuatorSnapshot?.irigasi ?? null}
+            controlsLocked={controlsLocked}
+            loading={loading}
+            onTurnOn={() => sendGatewayCommand('irrigation_on', 'Irigasi dinyalakan oleh ESP32 Gateway.')}
+            onTurnOff={() => sendGatewayCommand('irrigation_off', 'Irigasi dimatikan oleh ESP32 Gateway.')}
           />
-          <ControlButton
-            onClick={() => handleCommand('pump_off')}
-            icon={Timer}
-            label="Pompa OFF"
-            variant="danger"
+          <ActuatorCard
+            title="Fertigasi"
+            description="Membuka atau menutup jalur pemberian nutrisi."
+            icon={FlaskConical}
+            active={actuatorSnapshot?.fertigasi ?? null}
+            controlsLocked={controlsLocked}
+            loading={loading}
+            onTurnOn={() => sendGatewayCommand('fertigation_on', 'Fertigasi dinyalakan oleh ESP32 Gateway.')}
+            onTurnOff={() => sendGatewayCommand('fertigation_off', 'Fertigasi dimatikan oleh ESP32 Gateway.')}
           />
         </div>
 
-        <div className="mt-4">
-          <div className="flex items-center gap-3 mb-3">
-            <Timer className="w-5 h-5 text-green-600 dark:text-green-400" />
-            <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Pompa Otomatis 10 Detik</h3>
-          </div>
-          <div className="grid grid-cols-1 gap-3">
-            <ControlButton
-              onClick={() => handleCommand('pump_10s', 10)}
-              icon={Timer}
-              label="Jalankan Pompa 10 Detik"
-              variant="primary"
-            />
-          </div>
-          <p className="mt-3 text-sm text-slate-600 dark:text-slate-400">
-            Saat di set, pompa akan menyala selama 10 detik lalu otomatis mati.
+        {loading && <p className="mt-4 text-sm font-medium text-slate-600 dark:text-slate-300" role="status">Mengirim perintah dan menunggu konfirmasi Gateway…</p>}
+        {feedback && (
+          <p
+            className={`mt-4 rounded-xl border px-4 py-3 text-sm font-medium ${feedback.tone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-400/50 dark:bg-emerald-950/80 dark:text-emerald-50' : 'border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-400/50 dark:bg-rose-950/80 dark:text-rose-50'}`}
+            role={feedback.tone === 'error' ? 'alert' : 'status'}
+          >
+            {feedback.message}
           </p>
-        </div>
-      </div>
+        )}
+      </section>
     </div>
   );
 }

@@ -14,6 +14,10 @@ import mqtt from 'mqtt'; // Pastikan kamu menginstal library ini (npm install mq
 const COMMAND_MAP = {
   pump_on: { topic: 'sproutai/pompa/cmd', payload: 'ON' },
   pump_off: { topic: 'sproutai/pompa/cmd', payload: 'OFF' },
+  irrigation_on: { topic: 'sproutai/irigasi/cmd', payload: 'ON' },
+  irrigation_off: { topic: 'sproutai/irigasi/cmd', payload: 'OFF' },
+  fertigation_on: { topic: 'sproutai/fertigasi/cmd', payload: 'ON' },
+  fertigation_off: { topic: 'sproutai/fertigasi/cmd', payload: 'OFF' },
   pump_10s: (duration, commandId) => ({
     topic: 'sproutai/ai/action',
     payload: JSON.stringify({
@@ -139,9 +143,10 @@ async function publishToMqttBroker(topic, payload) {
 
   console.log('[MQTT Client] Connecting to configured broker');
   
-  // Membuka koneksi, mengirimkan pesan dengan QoS 1 (At Least Once) & Retain, lalu langsung memutuskannya secara aman
+  // Perintah aktuator tidak boleh retained: Gateway yang reconnect tidak boleh
+  // mengeksekusi ulang ON/OFF lama tanpa aksi baru dari pengguna.
   const client = await mqtt.connectAsync(mqttUrl, options);
-  await client.publishAsync(topic, payload, { qos: 1, retain: true });
+  await client.publishAsync(topic, payload, { qos: 1, retain: false });
   await client.endAsync();
   
   console.log(`[MQTT Client] Pesan sukses terpublikasi ke topik: ${topic}`);

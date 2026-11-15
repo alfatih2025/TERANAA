@@ -108,6 +108,16 @@ export interface MqttSensorSnapshot {
   sourceTopic: string | null;
 }
 
+export interface MqttActuatorSnapshot {
+  irigasi: boolean | null;
+  fertigasi: boolean | null;
+  pompa: boolean | null;
+  mode: 'manual' | 'auto' | null;
+  activeValve: string | null;
+  updatedAt: string | null;
+  sourceTopic: string | null;
+}
+
 export interface MqttStatusSnapshot {
   brokerUrl: string;
   browserOnline: boolean;
@@ -126,6 +136,7 @@ export interface MqttStatusSnapshot {
   webPublishedAt: string | null;
   subscribedTopics: string[];
   sensorSnapshot: MqttSensorSnapshot | null;
+  actuatorSnapshot: MqttActuatorSnapshot | null;
 }
 
 type SensorDelta = Partial<Omit<MqttSensorSnapshot, 'updatedAt' | 'sourceTopic'>>;
@@ -180,10 +191,12 @@ const defaultSnapshot = (): MqttStatusSnapshot => ({
   webPublishedAt: null,
   subscribedTopics: SUBSCRIBE_TOPICS,
   sensorSnapshot: null,
+  actuatorSnapshot: null,
 });
 
 let snapshot: MqttStatusSnapshot = defaultSnapshot();
 let sensorSnapshot: MqttSensorSnapshot | null = null;
+let actuatorSnapshot: MqttActuatorSnapshot | null = null;
 let sensorSnapshotByNode: Map<number, MqttSensorSnapshot> = new Map();
 let sensorHistory: MqttSensorSnapshot[] = [];
 let reconnectTimer: number | null = null;
@@ -549,8 +562,56 @@ function parseBoolean(value: unknown): boolean | undefined {
 function parseMode(value: unknown): 'manual' | 'auto' | null | undefined {
   if (typeof value !== 'string') return undefined;
   const normalized = value.trim().toLowerCase();
-  if (normalized === 'manual' || normalized === 'auto') return normalized;
+  if (normalized === 'manual') return 'manual';
+  if (normalized === 'auto' || normalized === 'otomatis') return 'auto';
   return undefined;
+}
+
+function parseActuatorStatusPayload(payload: string): Partial<Omit<MqttActuatorSnapshot, 'updatedAt' | 'sourceTopic'>> | null {
+  const parsed = parseMqttJsonPayload(payload);
+  if (!parsed) return null;
+
+  const irigasi = parseBoolean(parsed.irigasi);
+  const fertigasi = parseBoolean(parsed.fertigasi);
+  const pompa = parseBoolean(parsed.pompa ?? parsed.pump);
+  const mode = parseMode(parsed.mode ?? parsed.device_mode);
+  const activeValve = typeof parsed.active_valve === 'string'
+    ? parsed.active_valve.trim().toUpperCase()
+    : undefined;
+
+  if (irigasi === undefined && fertigasi === undefined && pompa === undefined && mode === undefined && activeValve === undefined) {
+    return null;
+  }
+
+  return { irigasi, fertigasi, pompa, mode, activeValve };
+}
+
+function setActuatorSnapshot(
+  next: Partial<Omit<MqttActuatorSnapshot, 'updatedAt' | 'sourceTopic'>>,
+  sourceTopic: string,
+) {
+  const previous: MqttActuatorSnapshot = actuatorSnapshot ?? {
+    irigasi: null,
+    fertigasi: null,
+    pompa: null,
+    mode: null,
+    activeValve: null,
+    updatedAt: null,
+    sourceTopic: null,
+  };
+
+  actuatorSnapshot = {
+    ...previous,
+    irigasi: next.irigasi ?? previous.irigasi,
+    fertigasi: next.fertigasi ?? previous.fertigasi,
+    pompa: next.pompa ?? previous.pompa,
+    mode: next.mode ?? previous.mode,
+    activeValve: next.activeValve ?? previous.activeValve,
+    updatedAt: new Date().toISOString(),
+    sourceTopic,
+  };
+
+  setSnapshot({ actuatorSnapshot });
 }
 
 function normalizeJsonSensorPayload(payload: string): SensorDelta | null {
@@ -643,11 +704,32 @@ function updateFromTopic(topic: string, payload: string) {
     return;
   }
 
+  if (topic === TOPIC_ACTUATOR_STATUS) {
+    const actuator = parseActuatorStatusPayload(trimmed);
+    if (actuator) setActuatorSnapshot(actuator, topic);
+
+    setSnapshot({
+      lastTopic: topic,
+      lastPayload: payload,
+      lastMessageAt: now,
+    });
+    return;
+  }
+
+  if (topic === TOPIC_POMPA_STATUS) {
+    const pompa = parseBoolean(trimmed);
+    if (pompa !== undefined) setActuatorSnapshot({ pompa }, topic);
+  }
+
+  if (topic === TOPIC_MODE_STATUS) {
+    const mode = parseMode(trimmed);
+    if (mode !== undefined) setActuatorSnapshot({ mode }, topic);
+  }
+
   if (
     topic === TOPIC_SENSOR_JSON ||
     topic === TOPIC_PH ||
     topic === TOPIC_FLOW ||
-    topic === TOPIC_ACTUATOR_STATUS ||
     topic === TOPIC_KARHUTLA_FWI ||
     topic === TOPIC_KARHUTLA_ALERT ||
     topic.startsWith('sproutai/sensor/node/')
@@ -989,6 +1071,24 @@ function applyLocalSnapshot(action: string, duration?: number, data?: Record<str
       dispatchSettingsEvent(nextSettings);
       break;
     }
+    case 'mode_auto':
+      setActuatorSnapshot({ mode: 'auto' }, action);
+      break;
+    case 'mode_manual':
+      setActuatorSnapshot({ mode: 'manual' }, action);
+      break;
+    case 'irrigation_on':
+      setActuatorSnapshot({ irigasi: true, fertigasi: false, pompa: true, activeValve: 'IRIGASI' }, action);
+      break;
+    case 'irrigation_off':
+      setActuatorSnapshot({ irigasi: false, fertigasi: false, pompa: false, activeValve: 'IDLE' }, action);
+      break;
+    case 'fertigation_on':
+      setActuatorSnapshot({ irigasi: false, fertigasi: true, pompa: true, activeValve: 'FERTIGASI' }, action);
+      break;
+    case 'fertigation_off':
+      setActuatorSnapshot({ irigasi: false, fertigasi: false, pompa: false, activeValve: 'IDLE' }, action);
+      break;
     default:
       break;
   }

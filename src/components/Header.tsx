@@ -1,4 +1,4 @@
-import { Bell, Wifi, WifiOff, ChevronDown, CheckCheck, ShieldAlert, Sun, Moon } from 'lucide-react';
+import { Bell, Wifi, WifiOff, ChevronDown, CheckCheck, Sun, Moon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect, useRef, useState } from 'react';
 import { MqttStatusSnapshot } from '../hooks/useMqttStatus';
@@ -22,6 +22,27 @@ const pageTitles: Record<string, string> = {
   settings: 'Pengaturan',
   about: 'About / Tentang TeraNova',
 };
+
+const notificationTone = {
+  danger: {
+    container: 'border-red-200 bg-red-50 dark:border-red-400/60 dark:bg-red-950/80',
+    title: 'text-red-950 dark:text-red-50',
+    meta: 'text-red-800 dark:text-red-100',
+    badge: 'bg-red-100 text-red-800 dark:bg-red-500/25 dark:text-red-50',
+  },
+  info: {
+    container: 'border-blue-200 bg-blue-50 dark:border-blue-400/60 dark:bg-blue-950/80',
+    title: 'text-blue-950 dark:text-blue-50',
+    meta: 'text-blue-800 dark:text-blue-100',
+    badge: 'bg-blue-100 text-blue-800 dark:bg-blue-500/25 dark:text-blue-50',
+  },
+  warning: {
+    container: 'border-amber-200 bg-amber-50 dark:border-amber-400/60 dark:bg-amber-950/80',
+    title: 'text-amber-950 dark:text-amber-50',
+    meta: 'text-amber-800 dark:text-amber-100',
+    badge: 'bg-amber-100 text-amber-800 dark:bg-amber-500/25 dark:text-amber-50',
+  },
+} as const;
 
 export function Header({ mqttStatus, currentPage, health }: HeaderProps) {
   const { theme, toggleTheme } = useTheme();
@@ -56,7 +77,8 @@ export function Header({ mqttStatus, currentPage, health }: HeaderProps) {
         <div className="flex items-center gap-2 sm:gap-3">
           <button
             onClick={toggleTheme}
-            className="p-2 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+            aria-label={theme === 'dark' ? 'Aktifkan mode terang' : 'Aktifkan mode gelap'}
+            className="rounded-full bg-slate-100 p-2 text-slate-600 transition-colors hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
           >
             {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
           </button>
@@ -88,7 +110,9 @@ export function Header({ mqttStatus, currentPage, health }: HeaderProps) {
               whileHover={{ scale: 1.03 }}
               whileTap={{ scale: 0.97 }}
               onClick={() => setOpen((prev) => !prev)}
-              className="relative inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white light-card px-3 py-2 text-slate-700 transition hover:bg-slate-100 dark:bg-gray-900 dark:border-gray-800 dark:text-gray-300"
+              aria-expanded={open}
+              aria-haspopup="dialog"
+              className="relative inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
               title="Notifikasi"
             >
               <Bell size={18} />
@@ -101,7 +125,7 @@ export function Header({ mqttStatus, currentPage, health }: HeaderProps) {
                   {unreadCount > 9 ? '9+' : unreadCount}
                 </motion.span>
               )}
-              <ChevronDown size={14} className={`text-slate-600 transition-transform ${open ? 'rotate-180' : ''}`} />
+              <ChevronDown size={14} className={`text-slate-600 transition-transform dark:text-slate-300 ${open ? 'rotate-180' : ''}`} />
             </motion.button>
 
             <AnimatePresence>
@@ -110,16 +134,18 @@ export function Header({ mqttStatus, currentPage, health }: HeaderProps) {
                   initial={{ opacity: 0, y: -8, scale: 0.98 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -8, scale: 0.98 }}
-                  className="absolute right-0 mt-3 w-[min(92vw,24rem)] overflow-hidden rounded-3xl border border-slate-200 bg-white light-card shadow-2xl dark:bg-gray-900 dark:border-gray-800"
+                  role="dialog"
+                  aria-label="Histori notifikasi"
+                  className="absolute right-0 mt-3 w-[min(92vw,24rem)] overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
                 >
-                  <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-gray-800">
+                  <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-700">
                     <div>
                       <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Histori Notifikasi</p>
                       <p className="text-xs text-slate-600 dark:text-slate-300">{unreadCount} belum dibaca</p>
                     </div>
                     <button
                       onClick={() => markAsRead()}
-                      className="inline-flex items-center gap-1 rounded-xl bg-green-50 px-3 py-2 text-xs font-semibold text-green-700 hover:bg-green-100"
+                      className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 transition-colors hover:bg-emerald-100 dark:border-emerald-400/50 dark:bg-emerald-950/80 dark:text-emerald-50 dark:hover:bg-emerald-950"
                     >
                       <CheckCheck size={14} />
                       Tandai semua
@@ -133,26 +159,22 @@ export function Header({ mqttStatus, currentPage, health }: HeaderProps) {
                       </div>
                     )}
 
-                    {alerts.slice(0, 10).map((alert) => (
-                      <div
-                        key={alert.id}
-                        className={`rounded-2xl border p-3 ${
-                          alert.severity === 'danger' ? 'border-red-200 bg-red-50' 
-                            : alert.severity === 'info' ? 'border-blue-200 bg-blue-50' 
-                            : 'border-amber-200 bg-amber-50'
-                        }`}
-                      >
-                        <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{alert.message}</p>
-                        <div className="mt-1 flex items-center justify-between">
-                          <p className="text-xs text-slate-600 dark:text-slate-300">{alert.type}</p>
-                          {!alert.read && (
-                            <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-green-700">
-                              Baru
-                            </span>
-                          )}
+                    {alerts.slice(0, 10).map((alert) => {
+                      const tone = notificationTone[alert.severity];
+                      return (
+                        <div key={alert.id} className={`rounded-2xl border p-3 ${tone.container}`}>
+                          <p className={`text-sm font-semibold ${tone.title}`}>{alert.message}</p>
+                          <div className="mt-1 flex items-center justify-between">
+                            <p className={`text-xs ${tone.meta}`}>{alert.type}</p>
+                            {!alert.read && (
+                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${tone.badge}`}>
+                                Baru
+                              </span>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </motion.div>
               )}

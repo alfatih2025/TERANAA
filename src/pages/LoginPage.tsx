@@ -45,7 +45,7 @@ export function LoginPage() {
 
           <div className="space-y-5">
             {displayError && (
-              <div className="p-3 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl flex flex-col gap-2 text-red-600 dark:text-red-400 text-sm break-words">
+              <div role="alert" className="flex flex-col gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800 break-words dark:border-red-400/50 dark:bg-red-950/80 dark:text-red-50">
                 <div className="flex items-center gap-2 font-bold">
                   <AlertCircle className="w-4 h-4 shrink-0" />
                   <span>Kesalahan:</span>

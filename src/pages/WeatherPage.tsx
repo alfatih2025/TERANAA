@@ -430,10 +430,10 @@ export function WeatherPage({ locationCode, settings, updateSettings }: WeatherP
 
 
 
-          <div className="flex flex-col gap-3 rounded-xl border border-green-100 bg-green-50 p-4 text-sm text-green-900 sm:flex-row sm:items-center sm:justify-between">
+          <div role="status" className="flex flex-col gap-3 rounded-xl border border-green-100 bg-green-50 p-4 text-sm text-green-900 dark:border-emerald-400/50 dark:bg-emerald-950/80 dark:text-emerald-50 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="font-semibold">Lokasi yang disimpan</p>
-              <p className="mt-1 text-green-800">{selectedLabel}</p>
+              <p className="mt-1 text-green-800 dark:text-emerald-100">{selectedLabel}</p>
             </div>
             <button
               type="button"
@@ -446,7 +446,7 @@ export function WeatherPage({ locationCode, settings, updateSettings }: WeatherP
             </button>
           </div>
           {saveError ? (
-            <div className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{saveError}</div>
+            <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-400/50 dark:bg-rose-950/80 dark:text-rose-50">{saveError}</div>
           ) : null}
 
         </motion.div>

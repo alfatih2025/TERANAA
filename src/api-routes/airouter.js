@@ -74,10 +74,17 @@ export default async function handler(req, res) {
     const n2 = dbNodes[2] || {};
     const n3 = dbNodes[3] || {};
 
+    // Ambil juga tren riwayat terbaru
+    const { data: recentHistory } = await supabase
+      .from('sensor_data')
+      .select('node_id, temperature, humidity, soil_temp, score, flow_rate, created_at')
+      .order('id', { ascending: false })
+      .limit(20);
+
     // Gabungkan data dari Supabase dengan sensorContext dari frontend
     const enrichedSensorContext = {
       ...(sensorContext || {}),
-      // Prioritaskan suhu hortikultura dari node 2 jika node 1 bernilai 0 (sensor offline)
+      // Hortikultura: ambil nilai aktif
       temperature: (n2.temperature != null && n2.temperature > 0) ? n2.temperature : (n1.temperature ?? sensorContext?.temperature ?? null),
       humidity: (n2.humidity != null && n2.humidity > 0) ? n2.humidity : (n1.humidity ?? sensorContext?.humidity ?? null),
       soil_moisture: n1.soil_moisture ?? n2.soil_moisture ?? sensorContext?.soil_moisture ?? null,
@@ -93,11 +100,35 @@ export default async function handler(req, res) {
       total_water: n0.total_water ?? sensorContext?.total_water ?? null,
       valve_status: n0.valve_status ?? sensorContext?.valve_status ?? null,
 
-      // Detail ringkasan per node
-      node1: n1.id ? { temp: n1.temperature, hum: n1.humidity, soil: n1.soil_moisture } : null,
-      node2: n2.id ? { temp: n2.temperature, hum: n2.humidity, soil: n2.soil_moisture } : null,
-      node3: n3.id ? { soil_temp: n3.soil_temp, temp: n3.temperature, hum: n3.humidity, fwi: n3.score, fwi_status: n3.fwi_status } : null,
-      gateway: n0.id ? { ph: n0.ph, flow_rate: n0.flow_rate, total_water: n0.total_water, valve_status: n0.valve_status } : null,
+      // Detail lengkap per node (semua parameter sensor)
+      node1: n1.id ? { 
+        temp: n1.temperature, 
+        hum: n1.humidity, 
+        soil: n1.soil_moisture,
+        status: (n1.temperature === 0 && n1.humidity === 0) ? 'Sensor DHT22 perlu diperiksa/kabel lepas' : 'Normal'
+      } : null,
+      node2: n2.id ? { 
+        temp: n2.temperature, 
+        hum: n2.humidity, 
+        soil: n2.soil_moisture,
+        status: 'Normal'
+      } : null,
+      node3: n3.id ? { 
+        soil_temp: n3.soil_temp, 
+        temp: n3.temperature, 
+        hum: n3.humidity, 
+        soil_moisture: n3.soil_moisture,
+        fwi: n3.score, 
+        fwi_status: (n3.score != null ? (n3.score >= 32 ? 'SANGAT TINGGI' : n3.score >= 18 ? 'TINGGI' : n3.score >= 9 ? 'SEDANG' : 'RENDAH (AMAN)') : '-'),
+        status: 'Normal'
+      } : null,
+      gateway: n0.id ? { 
+        ph: n0.ph, 
+        flow_rate: n0.flow_rate, 
+        total_water: n0.total_water, 
+        valve_status: n0.valve_status,
+        pump_status: n0.pump_status ? 'MENYALA' : 'MATI'
+      } : null,
     };
 
     const result = await sendAiRouterMessage({

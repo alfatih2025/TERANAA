@@ -64,10 +64,25 @@ const SUBSCRIBE_TOPICS = [
 
 const ESP_ONLINE_TIMEOUT_MS = 15_000; // 15 detik sebelum ESP32 dianggap offline
 const HISTORY_LIMIT = 120;
-const SENSOR_PERSIST_INTERVAL_MS = 30_000;
 const SETTINGS_EVENT = 'nexagrow:settings-updated';
 
-const lastPersistedByNode = new Map<number, { json: string; at: number }>();
+// Pengaturan Penyimpanan Cerdas ke Supabase (Smart Change-Detection + Throttle + Heartbeat)
+const MIN_PERSIST_GAP_MS = 15_000; // Minimal jeda 15 detik per node sebelum kirim lagi
+const HEARTBEAT_PERSIST_INTERVAL_MS = 5 * 60 * 1000; // Tetap simpan 1x tiap 5 menit jika data stabil
+
+interface PersistedMetrics {
+  temperature: number | null;
+  humidity: number | null;
+  soil_moisture: number | null;
+  soil_temp: number | null;
+  ph: number | null;
+  flow_rate: number | null;
+  valve_status: string | null;
+  score: number | null;
+  at: number;
+}
+
+const lastPersistedMetricsByNode = new Map<number, PersistedMetrics>();
 
 export interface MqttSensorSnapshot {
   device_id: string | null;
@@ -358,12 +373,67 @@ async function persistSensorDataToApi(payload: string, parsed: SensorDelta) {
     }));
   } catch {}
 
-  const prevPersist = lastPersistedByNode.get(nodeId);
-  if (prevPersist && prevPersist.json === normalized && now - prevPersist.at < SENSOR_PERSIST_INTERVAL_MS) {
+  const prev = lastPersistedMetricsByNode.get(nodeId);
+  const timeSinceLast = prev ? now - prev.at : Infinity;
+
+  // 1. Throttle: Jangan kirim jika belum lewat MIN_PERSIST_GAP_MS (15 detik)
+  if (timeSinceLast < MIN_PERSIST_GAP_MS) {
     return;
   }
 
-  lastPersistedByNode.set(nodeId, { json: normalized, at: now });
+  // 2. Evaluasi apakah ada perubahan sensor yang signifikan (Smart Deadband)
+  let hasSignificantChange = false;
+  if (!prev) {
+    // Belum pernah disimpan sejak buka web -> simpan pertama kali
+    hasSignificantChange = true;
+  } else if (timeSinceLast >= HEARTBEAT_PERSIST_INTERVAL_MS) {
+    // Sudah lewat 5 menit tanpa perubahan -> simpan sebagai heartbeat periodik
+    hasSignificantChange = true;
+  } else {
+    // Cek perbedaan metrik sensor yang melampaui toleransi fluktuasi/noise
+    const diff = (a: number | null | undefined, b: number | null | undefined) => {
+      if (a == null && b == null) return 0;
+      if (a == null || b == null) return Infinity;
+      return Math.abs(a - b);
+    };
+
+    if (diff(parsed.temperature, prev.temperature) >= 0.3) hasSignificantChange = true;
+    if (diff(parsed.humidity, prev.humidity) >= 1.0) hasSignificantChange = true;
+    if (diff(parsed.soil_moisture, prev.soil_moisture) >= 1.0) hasSignificantChange = true;
+    if (diff(parsed.soil_temp, prev.soil_temp) >= 0.3) hasSignificantChange = true;
+    if (diff(parsed.ph, prev.ph) >= 0.1) hasSignificantChange = true;
+    if (diff(parsed.fwi, prev.score) >= 0.5) hasSignificantChange = true;
+
+    // Water flow: catat jika mulai mengalir/berhenti atau laju berubah >= 5 L/min
+    const curFlow = parsed.flow_rate ?? 0;
+    const prevFlow = prev.flow_rate ?? 0;
+    if ((curFlow > 0) !== (prevFlow > 0) || Math.abs(curFlow - prevFlow) >= 5.0) {
+      hasSignificantChange = true;
+    }
+
+    // Status valve berubah
+    if ((parsed.valve_status ?? '') !== (prev.valve_status ?? '')) {
+      hasSignificantChange = true;
+    }
+  }
+
+  // Jika tidak ada perubahan signifikan dan belum waktunya heartbeat, hemat kuota DB & jangan kirim
+  if (!hasSignificantChange) {
+    return;
+  }
+
+  // Catat metrik yang disimpan
+  lastPersistedMetricsByNode.set(nodeId, {
+    temperature: parsed.temperature ?? null,
+    humidity: parsed.humidity ?? null,
+    soil_moisture: parsed.soil_moisture ?? null,
+    soil_temp: parsed.soil_temp ?? null,
+    ph: parsed.ph ?? null,
+    flow_rate: parsed.flow_rate ?? null,
+    valve_status: parsed.valve_status ?? null,
+    score: parsed.fwi ?? null,
+    at: now,
+  });
 
   const apiToken = (import.meta.env.VITE_API_AUTH_TOKEN as string | undefined)?.trim() || 'teranova-iot-secret-2026';
 

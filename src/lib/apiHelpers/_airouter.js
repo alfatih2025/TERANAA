@@ -71,9 +71,19 @@ function buildSystemPrompt(sensor, yesterdayHistory) {
   const sensorLines = sensor ? [
     formatLine('Device ID', sensor.device_id),
     formatLine('Fase Tanaman', sensor.plant_phase),
-    formatLine('Suhu', sensor.temperature, ' °C'),
-    formatLine('Kelembapan Udara', sensor.humidity, ' %'),
+    formatLine('Suhu Mikro Lahan', sensor.temperature, ' °C'),
+    formatLine('Kelembapan Udara Mikro', sensor.humidity, ' %'),
     formatLine('Kelembapan Tanah', sensor.soil_moisture, ' %'),
+    formatLine('Suhu Gambut (Node 3 Karhutla)', sensor.soil_temp, ' °C'),
+    formatLine('Skor FWI Indeks Karhutla (Node 3)', sensor.fwi),
+    formatLine('Status Bahaya Karhutla', sensor.fwi_status),
+    formatLine('pH Tanah (ESP32 Gateway)', sensor.ph),
+    formatLine('Debit Aliran Air / Flow Rate (Gateway)', sensor.flow_rate, ' L/menit'),
+    formatLine('Total Air Terpakai (Gateway)', sensor.total_water, ' Liter'),
+    formatLine('Status Katup Irigasi (Gateway)', sensor.valve_status),
+    sensor.node1 ? `- Data Node 1 (Bedeng A): Suhu ${sensor.node1.temp ?? '-'}°C, Lembap ${sensor.node1.hum ?? '-'}%, Tanah ${sensor.node1.soil ?? '-'}%` : null,
+    sensor.node2 ? `- Data Node 2 (Bedeng B): Suhu ${sensor.node2.temp ?? '-'}°C, Lembap ${sensor.node2.hum ?? '-'}%, Tanah ${sensor.node2.soil ?? '-'}%` : null,
+    sensor.node3 ? `- Data Node 3 (Karhutla): Suhu Gambut ${sensor.node3.soil_temp ?? '-'}°C, FWI ${sensor.node3.fwi ?? '-'}, Status ${sensor.node3.fwi_status ?? '-'}` : null,
     formatLine('Batas kelembapan tanah bawah', sensor.soil_threshold_low, ' %'),
     formatLine('Batas kelembapan tanah kritis', sensor.soil_threshold_critical, ' %'),
     formatLine('Batas kelembapan tanah atas', sensor.soil_threshold_high, ' %'),
@@ -84,7 +94,7 @@ function buildSystemPrompt(sensor, yesterdayHistory) {
     formatLine('Suhu cuaca', sensor.weather_temperature, ' °C'),
     formatLine('Peluang hujan', sensor.weather_rain_chance, ' %'),
     formatLine('Prakiraan cuaca', typeof sensor.weather_forecast === 'string' ? sensor.weather_forecast.slice(0, 1200) : null),
-  ].join('\n') : 'Data sensor belum tersedia.';
+  ].filter(Boolean).join('\n') : 'Data sensor belum tersedia.';
   const yesterdayLines = yesterdayHistory && typeof yesterdayHistory === 'object'
     ? [
       `Ringkasan: ${String(yesterdayHistory.summary || '-').slice(0, 1000)}`,

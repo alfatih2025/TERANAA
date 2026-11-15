@@ -12,6 +12,7 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage').then(({ SettingsP
 const AiRouterPage = lazy(() => import('./pages/AiRouterPage').then(({ AiRouterPage }) => ({ default: AiRouterPage })));
 const AboutPage = lazy(() => import('./pages/AboutPage').then(({ AboutPage }) => ({ default: AboutPage })));
 import { useMultiNodeSensorData } from './hooks/useMultiNodeSensorData';
+import { getNodeSensorSnapshot } from './services/mqtt';
 
 import { useWeather } from './hooks/useWeather';
 import { useSettings } from './hooks/useSettings';
@@ -125,22 +126,33 @@ function App() {
       window.history.replaceState(null, '', path);
     }
   }, [activePage]);
-  const { node1, node2, loading: sensorLoading } = useMultiNodeSensorData();
+  const { node1, node2, node3, loading: sensorLoading } = useMultiNodeSensorData();
   
   const liveSensorData = useMemo(() => {
-    // Gunakan node1 sebagai sumber utama untuk AI dan Health Status
-    // atau gunakan rata-rata dari kedua node jika keduanya ada.
-    if (!node1 && !node2) return null;
+    if (!node1 && !node2 && !node3) return null;
     
+    const gatewaySnap = getNodeSensorSnapshot(0);
+
     return {
-      node_id: node1?.node_id ?? node2?.node_id ?? 1,
+      node_id: node1?.node_id ?? node2?.node_id ?? node3?.node_id ?? 1,
       device_id: 'ESP32_001',
-      temperature: node1?.temperature ?? node2?.temperature ?? null,
-      humidity: node1?.humidity ?? node2?.humidity ?? null,
+      temperature: node1?.temperature ?? node2?.temperature ?? node3?.temperature ?? null,
+      humidity: node1?.humidity ?? node2?.humidity ?? node3?.humidity ?? null,
       soil_moisture: node1?.soil_moisture ?? node2?.soil_moisture ?? null,
-      created_at: node1?.created_at ?? node2?.created_at ?? new Date().toISOString(),
+      soil_temp: node3?.soil_temp ?? null,
+      fwi: node3?.fwi ?? null,
+      fwi_status: node3?.fwi_status ?? null,
+      ph: gatewaySnap?.ph ?? null,
+      flow_rate: gatewaySnap?.flow_rate ?? null,
+      total_water: gatewaySnap?.total_water ?? null,
+      valve_status: gatewaySnap?.valve_status ?? null,
+      node1: node1 ? { temp: node1.temperature, hum: node1.humidity, soil: node1.soil_moisture } : null,
+      node2: node2 ? { temp: node2.temperature, hum: node2.humidity, soil: node2.soil_moisture } : null,
+      node3: node3 ? { soil_temp: node3.soil_temp, temp: node3.temperature, hum: node3.humidity, fwi: node3.fwi, fwi_status: node3.fwi_status } : null,
+      gateway: gatewaySnap ? { ph: gatewaySnap.ph, flow_rate: gatewaySnap.flow_rate, total_water: gatewaySnap.total_water, valve_status: gatewaySnap.valve_status } : null,
+      created_at: node1?.created_at ?? node2?.created_at ?? node3?.created_at ?? new Date().toISOString(),
     };
-  }, [node1, node2]);
+  }, [node1, node2, node3]);
 
   const health = useMemo(() => {
     if (!settings) return null;

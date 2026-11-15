@@ -117,17 +117,29 @@ function buildChatMetadata(latestSensor, latestSettings, role) {
 }
 
 
-function buildSystemPrompt(latestSensor, settings = {}, yesterdayHistory = null) {
+function buildSystemPrompt(latestSensor, settings = {}, yesterdayHistory = null, multiNode = {}, trends = '') {
   const phase = String(settings.plant_phase || settings.crop_mode || 'vegetatif').trim().toLowerCase() === 'generatif'
     ? 'generatif'
     : 'vegetatif';
 
-  let basePrompt = `Kamu adalah Smart Farm Assistant, ahli pertanian cerdas yang membantu petani mengelola lahan.
+  const n1 = multiNode[1] || null;
+  const n2 = multiNode[2] || null;
+  const n3 = multiNode[3] || null;
+  const gw = multiNode[0] || null;
 
-FOKUS:
+  let multiNodeSection = `
+DATA TERKINI SETIAP NODE DARI DATABASE SUPABASE:
+- Node 1 (Hortikultura Bedeng A): Suhu ${n1?.temperature ?? '-'}°C, Kelembapan Udara ${n1?.humidity ?? '-'}%, Kelembapan Tanah ${n1?.soil_moisture ?? '-'}%
+- Node 2 (Hortikultura Bedeng B): Suhu ${n2?.temperature ?? '-'}°C, Kelembapan Udara ${n2?.humidity ?? '-'}%, Kelembapan Tanah ${n2?.soil_moisture ?? '-'}%
+- Node 3 (Sektor Gambut - Pencegahan Karhutla): Suhu Gambut (DS18B20) ${n3?.soil_temp ?? '-'}°C, Suhu Udara ${n3?.temperature ?? '-'}°C, Lembap Udara ${n3?.humidity ?? '-'}%, Skor FWI BMKG ${n3?.score ?? '-'}
+- ESP32 Gateway (Irigasi & Aktuator): pH Tanah ${gw?.ph ?? '-'}, Debit Aliran Air ${gw?.flow_rate ?? 0} L/menit, Total Volume Air ${gw?.total_water ?? 0} Liter, Status Katup ${gw?.valve_status ?? 'IDLE'}, Status Pompa ${latestSensor?.pump_status ? 'MENYALA' : 'MATI'}`;
+
+  let basePrompt = `Kamu adalah TeraNova AI Assistant, pakar cerdas Pertanian Presisi (Smart Agriculture) dan Mitigasi Karhutla Lahan Gambut. Kamu memiliki akses langsung ke database sensor Supabase untuk menganalisis, memprediksi, dan mengolah data.
+
+FOKUS & METRIK TANAMAN:
 - Fase tanaman aktif: ${phase.toUpperCase()}
-- Suhu: ${latestSensor?.temperature ?? 28}°C
-- Kelembapan Udara: ${latestSensor?.humidity ?? 70}%
+- Suhu Mikro: ${latestSensor?.temperature ?? 28}°C
+- Kelembapan Udara Mikro: ${latestSensor?.humidity ?? 70}%
 - Kelembapan Tanah: ${latestSensor?.soil_moisture ?? 60}%
 - Ambang Suhu: ${settings.temp_threshold_low ?? 0} - ${settings.temp_threshold_high ?? 0} °C
 - Ambang Kelembapan Udara: ${settings.humidity_threshold_low ?? 0} - ${settings.humidity_threshold_high ?? 0} %
@@ -136,10 +148,13 @@ FOKUS:
 - Jadwal Siram: ${latestSensor?.schedule_enabled === false ? 'NONAKTIF' : 'AKTIF'}
 - Jam Siram: ${latestSensor?.watering_time ?? '-'}
 - Durasi Siram: ${latestSensor?.watering_duration ?? '-'} detik
-
-Gunakan rumus pengolahan Arduino berikut tanpa mengganti konstanta kecuali pengguna meminta kalibrasi baru secara eksplisit.
-
-Jika user memberi prompt yang membahas iklim berbeda atau kondisi hipotetis lain, jawab sesuai skenario itu, bukan memaksa data sensor asli. Gunakan bahasa Indonesia yang ramah, singkat, dan akurat.`;
+${multiNodeSection}
+${trends ? `\nTREN DATA DATABASE TERKINI:\n${trends}\n` : ''}
+PANDUAN ANALISIS & PREDIKSI:
+1. Hubungkan data multi-node: bedeng hortikultura (Node 1 & 2), risiko karhutla gambut (Node 3), dan status air/irigasi (Gateway).
+2. Jika pengguna bertanya tentang prediksi atau kondisi lahan, gunakan data real-time dan riwayat di atas untuk memberikan insight apakah tanah butuh penyiraman, apakah lahan gambut berpotensi terbakar, atau apakah debit air normal.
+3. Gunakan rumus pengolahan Arduino/VPD yang relevan jika membahas rekomendasi penyiraman.
+4. Gunakan bahasa Indonesia yang ramah, ringkas, solutif, dan profesional.`;
 
   // Tambahkan konteks kemarin jika tersedia
   if (yesterdayHistory && yesterdayHistory.insights) {
@@ -217,12 +232,39 @@ export default async function handler(req, res) {
       const { message, yesterdayHistory = null } = req.body || {};
       const user_id = authenticatedUser.uid;
 
-      const { data: latestSensor } = await supabase
+      // Ambil 30 baris sensor data terbaru dari Supabase untuk multi-node & analisa tren
+      const { data: recentRows } = await supabase
         .from('sensor_data')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
+        .limit(30);
+
+      const multiNode = {};
+      if (Array.isArray(recentRows)) {
+        for (const r of recentRows) {
+          if (r.node_id != null && !multiNode[r.node_id]) {
+            multiNode[r.node_id] = r;
+          }
+        }
+      }
+
+      // Prioritaskan node tanaman (Node 1 atau Node 2) untuk metrik hortikultura dasar
+      const latestSensor = multiNode[1] || multiNode[2] || (Array.isArray(recentRows) ? recentRows[0] : null) || {};
+
+      // Buat ringkasan tren singkat dari database
+      let trendSummary = '';
+      if (Array.isArray(recentRows) && recentRows.length > 0) {
+        const n3Rows = recentRows.filter(r => r.node_id === 3).slice(0, 5);
+        if (n3Rows.length > 1) {
+          const first = n3Rows[n3Rows.length - 1];
+          const latest = n3Rows[0];
+          trendSummary += `- Suhu Gambut (Node 3): bergerak dari ${first.soil_temp ?? '-'}°C ke ${latest.soil_temp ?? '-'}°C (Skor FWI: ${latest.score ?? '-'})\n`;
+        }
+        const gwRows = recentRows.filter(r => r.node_id === 0).slice(0, 5);
+        if (gwRows.length > 0) {
+          trendSummary += `- Gateway: Total air terakumulasi ${gwRows[0].total_water ?? 0}L, laju aliran saat ini ${gwRows[0].flow_rate ?? 0} L/menit\n`;
+        }
+      }
 
       const { data: latestSettings } = await supabase
         .from('settings')
@@ -277,7 +319,7 @@ export default async function handler(req, res) {
         }
       );
 
-      const systemPrompt = buildSystemPrompt(latestSensor, latestSettings || {}, yesterdayHistory);
+      const systemPrompt = buildSystemPrompt(latestSensor, latestSettings || {}, yesterdayHistory, multiNode, trendSummary);
 
       let aiResponse = '';
 

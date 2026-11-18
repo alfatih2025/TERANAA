@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { FileText, Download, Bot, Zap, Activity, CalendarDays, Filter, RefreshCw, Trash2 } from 'lucide-react';
-import { buildApiHeaders } from '../lib/apiAuth';
+import { buildApiHeaders, buildOptionalFirebaseAuthHeaders } from '../lib/apiAuth';
 import {
   readActivityLogs,
   sortActivityLogs,
@@ -65,10 +65,6 @@ const sourceColors = {
   control: 'bg-blue-100 text-blue-700',
   sensor: 'bg-blue-100 text-blue-700',
 };
-
-function safeString(value: unknown) {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 function describeSensor(row: SensorRow) {
   return `Suhu ${Number(row.temperature).toFixed(1)}°C • Udara ${Number(row.humidity).toFixed(1)}% • Tanah ${Number(row.soil_moisture).toFixed(1)}% • Pompa ${row.pump_status ? 'ON' : 'OFF'}`;
@@ -140,7 +136,10 @@ function mapSensorRow(entry: SensorRow): UnifiedLog {
 }
 
 async function fetchJson<T>(url: string): Promise<T[]> {
-  const response = await fetch(url, { headers: buildApiHeaders() });
+  const headers = url.startsWith('/api/chat')
+    ? await buildOptionalFirebaseAuthHeaders()
+    : buildApiHeaders();
+  const response = await fetch(url, { headers });
   if (!response.ok) return [];
   const payload = await response.json().catch(() => []);
   return Array.isArray(payload) ? payload as T[] : [];

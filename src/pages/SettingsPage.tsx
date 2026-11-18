@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Settings as SettingsIcon, User, Sprout, Wifi, CalendarDays, SlidersHorizontal, Droplets, Thermometer, MapPinned, Users, UserPlus, Trash2 } from 'lucide-react';
+import { Settings as SettingsIcon, Sprout, Wifi, CalendarDays, SlidersHorizontal, Droplets, Thermometer, MapPinned, Users, UserPlus, Trash2 } from 'lucide-react';
 import { useSettings, Settings as SettingsType } from '../hooks/useSettings';
 import { useControl } from '../hooks/useControl';
 import { useWeather } from '../hooks/useWeather';
@@ -462,7 +462,7 @@ export function SettingsPage() {
             </div>
 
             <div className="lg:col-span-2 space-y-3">
-              <h3 className="font-semibold text-slate-800 dark:text-slate-200">Daftar Admin & Pengguna</h3>
+              <h3 className="font-semibold text-slate-800 dark:text-slate-200">Daftar Administrator</h3>
               {users.map(user => (
                 <div key={user.id} className="flex items-center justify-between p-4 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl">
                   <div className="flex items-center gap-3">
@@ -471,7 +471,7 @@ export function SettingsPage() {
                     </div>
                     <div>
                       <div className="font-semibold text-slate-900 dark:text-white text-sm">{user.username} {user.email && <span className="text-xs font-normal text-slate-500 ml-1">({user.email})</span>}</div>
-                      <div className="text-xs text-slate-500">{user.role === 'admin' ? 'Administrator' : 'Pengguna Biasa'} {user.id.startsWith('invited_') && '(Belum Login)'}</div>
+                      <div className="text-xs text-slate-500">{user.role === 'admin' ? 'Administrator' : 'Pengguna Biasa'}</div>
                     </div>
                   </div>
                   {/* Jangan izinkan admin menghapus alfatihwibowo264@gmail.com (Super Admin) atau dirinya sendiri */}

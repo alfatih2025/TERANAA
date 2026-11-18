@@ -5,6 +5,7 @@ import path from 'path';
 import sensorApi from './src/api-routes/sensor.js';
 import alertsApi from './src/api-routes/alerts.js';
 import chatApi from './src/api-routes/chat.js';
+import adminUsersApi from './src/api-routes/admin-users.js';
 import controlApi from './src/api-routes/control.js';
 import deviceStatusApi from './src/api-routes/device-status.js';
 import exportApi from './src/api-routes/export.js';
@@ -70,6 +71,7 @@ async function startServer() {
   app.all('/api/sensor-data', apiHandler(sensorApi)); // Alias for old endpoint
   app.all('/api/alerts', apiHandler(alertsApi));
   app.all('/api/chat', apiHandler(chatApi));
+  app.all('/api/admin-users', apiHandler(adminUsersApi));
   app.all('/api/control', apiHandler(controlApi));
   app.all('/api/device-status', apiHandler(deviceStatusApi));
   app.all('/api/export', apiHandler(exportApi));

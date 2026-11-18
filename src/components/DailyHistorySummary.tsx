@@ -40,7 +40,7 @@ export function DailyHistorySummary({
   }
 
   const isToday = selectedTarget === 'today';
-  const targetLabel = isToday ? 'Hari Ini' : 'Kemarin';
+
   const formatDate = (date: string) => new Intl.DateTimeFormat('id-ID', {
     weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric',
   }).format(new Date(`${date}T00:00:00+07:00`));
@@ -179,20 +179,20 @@ export function DailyHistorySummary({
               <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
                 <MetricCard
                   label="Suhu"
-                  value={`${history.metrics.temperature?.min}°C`}
-                  unit={`max ${history.metrics.temperature?.max}°C`}
+                  value={`${history.metrics?.temperature?.min ?? '-'}°C`}
+                  unit={`max ${history.metrics?.temperature?.max ?? '-'}°C`}
                   icon="🌡️"
                 />
                 <MetricCard
                   label="Kelembapan"
-                  value={`${history.metrics.humidity?.min}%`}
-                  unit={`max ${history.metrics.humidity?.max}%`}
+                  value={`${history.metrics?.humidity?.min ?? '-'}%`}
+                  unit={`max ${history.metrics?.humidity?.max ?? '-'}%`}
                   icon="💧"
                 />
                 <MetricCard
                   label="Tanah"
-                  value={`${history.metrics.soil_moisture?.min}%`}
-                  unit={`max ${history.metrics.soil_moisture?.max}%`}
+                  value={`${history.metrics?.soil_moisture?.min ?? '-'}%`}
+                  unit={`max ${history.metrics?.soil_moisture?.max ?? '-'}%`}
                   icon="🌱"
                 />
                 <MetricCard

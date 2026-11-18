@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Bot, Sparkles, Sprout, RefreshCw, Wifi, WifiOff, AlertTriangle, Leaf, Mic, MicOff, Image as ImageIcon, X, Volume2, VolumeX } from 'lucide-react';
+import { Send, Bot, Sparkles, Sprout, RefreshCw, Wifi, WifiOff, AlertTriangle, Leaf, Mic, MicOff, Image as ImageIcon, X, Volume2, VolumeX, Plus } from 'lucide-react';
 import { useChat } from '../hooks/useChat';
+import { useAuth } from '../hooks/useAuthContext';
 import { useVoiceRecognition } from '../hooks/useVoiceRecognition';
 import type { SensorData } from '../hooks/useSensorData';
 import type { Settings } from '../hooks/useSettings';
@@ -262,7 +263,23 @@ function renderAssistantMessage(content: string) {
 import { AiAnalysisView } from './AiAnalysisView';
 
 export function ChatInterface({ sensorData = null, settings = null, weatherData = null, variant = 'full' }: ChatInterfaceProps) {
-  const { messages, loading, error, analysisData, sendMessage, clearMessages, connectionStatus, refreshConnectionStatus } = useChat();
+  const {
+    messages,
+    conversations,
+    activeConversation,
+    activeConversationId,
+    isReadOnlyConversation,
+    loading,
+    error,
+    analysisData,
+    sendMessage,
+    clearMessages,
+    selectConversation,
+    startNewConversation,
+    connectionStatus,
+    refreshConnectionStatus,
+  } = useChat();
+  const { currentUser } = useAuth();
   const [input, setInput] = useState('');
   const [attachedImages, setAttachedImages] = useState<string[]>([]);
   const [activeSpeechId, setActiveSpeechId] = useState<number | null>(null);
@@ -408,16 +425,19 @@ export function ChatInterface({ sensorData = null, settings = null, weatherData 
   const groupedMessages = useMemo(() => {
     const groups: { dateLabel: string; messages: typeof messages }[] = [];
     
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    
-    const formatKey = (d: Date) => `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
-    const todayKey = formatKey(today);
-    const yesterdayKey = formatKey(yesterday);
+    const formatKey = (date: Date) => new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Jakarta',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(date);
+    const todayKey = formatKey(new Date());
+    const yesterdayDate = new Date(`${todayKey}T12:00:00+07:00`);
+    yesterdayDate.setUTCDate(yesterdayDate.getUTCDate() - 1);
+    const yesterdayKey = formatKey(yesterdayDate);
     
     messages.forEach((msg) => {
-      const d = new Date(msg.created_at || Date.now());
+      const d = new Date(msg.created_at || 0);
       const key = formatKey(d);
       let label = '';
       
@@ -470,7 +490,7 @@ export function ChatInterface({ sensorData = null, settings = null, weatherData 
   return (
     <div className={rootClassName}>
       <div className={headerClassName}>
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-center gap-3">
             <div className={`flex items-center justify-center rounded-xl bg-gradient-to-br from-green-500 to-teal-600 ${isCompact ? 'h-9 w-9' : 'h-10 w-10'}`}>
               <Bot className={`${isCompact ? 'h-4 w-4' : 'h-5 w-5'} text-white`} />
@@ -485,7 +505,7 @@ export function ChatInterface({ sensorData = null, settings = null, weatherData 
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
             {!isCompact && (
               <div className={`hidden items-center gap-1 rounded-full border px-3 py-1 text-[11px] font-medium sm:flex ${statusTone.chip}`}>
                 <StatusIcon size={12} className={connectionStatus.state === 'checking' ? 'animate-spin' : ''} />
@@ -493,25 +513,61 @@ export function ChatInterface({ sensorData = null, settings = null, weatherData 
               </div>
 
             )}
-            <button
+            {!isCompact && currentUser && (
+              <div className="flex items-center gap-2">
+                <label className="sr-only" htmlFor="chat-conversation-select">Pilih percakapan AI</label>
+                <select
+                  id="chat-conversation-select"
+                  aria-label="Pilih percakapan AI"
+                  value={activeConversationId || ''}
+                  onChange={(event) => selectConversation(event.target.value)}
+                  disabled={loading || conversations.length === 0}
+                  className="w-36 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-green-500/30 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 sm:w-52"
+                >
+                  {conversations.map((conversation) => (
+                    <option key={conversation.id} value={conversation.id}>
+                      {new Intl.DateTimeFormat('id-ID', {
+                        day: '2-digit',
+                        month: 'short',
+                        timeZone: 'Asia/Jakarta',
+                      }).format(new Date(`${conversation.conversation_date}T12:00:00+07:00`))}
+                      {' · '}
+                      {conversation.title}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={startNewConversation}
+                  disabled={!currentUser || loading}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-2.5 py-2 text-xs font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  aria-label="Mulai percakapan baru"
+                >
+                  <Plus size={14} />
+                  Baru
+                </button>
+              </div>
+            )}
+            {currentUser && <button
               type="button"
               onClick={() => {
-                if (window.confirm('Hapus semua riwayat chat hari ini? Histori tanggal lain tetap aman.')) {
+                if (window.confirm('Hapus percakapan ini beserta semua pesannya?')) {
                   void clearMessages();
                 }
               }}
               disabled={loading || messages.length === 0}
               className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-500/30 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/60"
-              title="Hapus riwayat chat hari ini"
+              title="Hapus percakapan ini"
             >
-              Hapus Chat
-            </button>
+              Hapus
+            </button>}
             <button
               type="button"
               onClick={refreshConnectionStatus}
               disabled={loading}
               className="rounded-lg border border-white/60 bg-white/80 p-2 text-gray-600 transition hover:bg-white light-card disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700"
               title="Periksa ulang koneksi AI Online"
+              aria-label="Periksa ulang koneksi AI"
 
             >
               <RefreshCw size={16} className={connectionStatus.state === 'checking' ? 'animate-spin' : ''} />
@@ -534,6 +590,11 @@ export function ChatInterface({ sensorData = null, settings = null, weatherData 
               <p className="mt-1 text-xs leading-snug text-gray-600 dark:text-gray-300">{weatherLocationLabel || weatherData?.location}</p>
             </div>
           </div>
+        )}
+        {isReadOnlyConversation && (
+          <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-950/30 dark:text-amber-200">
+            Percakapan tanggal {activeConversation?.conversation_date} hanya dapat dibaca. Mulai percakapan baru untuk hari ini.
+          </p>
         )}
       </div>
 
@@ -561,6 +622,7 @@ export function ChatInterface({ sensorData = null, settings = null, weatherData 
                     key={prompt.label}
                     type="button"
                     onClick={() => handleQuickPrompt(prompt.text)}
+                    disabled={isReadOnlyConversation || loading}
                     className={`inline-flex items-center gap-2 rounded-full border border-green-100 bg-green-50 font-medium text-green-700 transition hover:bg-green-100 dark:border-green-500/20 dark:bg-green-950/30 dark:text-green-300 dark:hover:bg-green-950/50 ${isCompact ? 'px-3 py-1.5 text-xs' : 'px-4 py-2 text-sm'}`}
                   >
                     <Icon size={14} />
@@ -640,7 +702,7 @@ export function ChatInterface({ sensorData = null, settings = null, weatherData 
         )}
 
         {error && (
-          <div className="flex justify-start">
+          <div className="flex justify-start" role="alert">
             <div className="max-w-[80%] rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700 shadow-sm dark:border-red-500/30 dark:bg-red-950/40 dark:text-red-300">
               {error}
             </div>
@@ -691,6 +753,7 @@ export function ChatInterface({ sensorData = null, settings = null, weatherData 
             onChange={(e) => setInput(e.target.value)}
             placeholder={isListening ? 'Mendengarkan suara Anda...' : 'Tanyakan kondisi tanaman, unggah foto daun/tanaman, atau penyiraman...'}
             rows={isCompact ? 1 : 2}
+            disabled={isReadOnlyConversation || loading}
             className={`flex-1 resize-none rounded-xl border border-gray-200 bg-slate-100 px-4 py-3 text-sm text-slate-900 placeholder:text-slate-500 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 ${
               isListening ? 'border-red-400 bg-red-50/30 dark:bg-red-900/10 animate-pulse' : ''
             } ${isCompact ? 'min-h-[44px]' : 'min-h-[56px]'}`}
@@ -700,9 +763,10 @@ export function ChatInterface({ sensorData = null, settings = null, weatherData 
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              disabled={loading}
+              disabled={isReadOnlyConversation || loading}
               className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-slate-600 transition hover:bg-slate-100 hover:text-green-600 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
               title="Unggah Foto Tanaman (Image Analytics)"
+              aria-label="Unggah foto tanaman"
             >
               <ImageIcon size={18} />
             </button>
@@ -711,13 +775,14 @@ export function ChatInterface({ sensorData = null, settings = null, weatherData 
               <button
                 type="button"
                 onClick={toggleListening}
-                disabled={loading}
+                disabled={isReadOnlyConversation || loading}
                 className={`rounded-xl border p-3 transition disabled:opacity-50 ${
                   isListening
                     ? 'border-red-400 bg-red-500 text-white animate-pulse shadow-lg shadow-red-500/30'
                     : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-green-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
                 }`}
                 title={isListening ? 'Matikan Mikrofon' : 'Mulai Rekam Suara (Voice Recognition)'}
+                aria-label={isListening ? 'Matikan mikrofon' : 'Mulai rekam suara'}
               >
                 {isListening ? <MicOff size={18} /> : <Mic size={18} />}
               </button>
@@ -725,7 +790,7 @@ export function ChatInterface({ sensorData = null, settings = null, weatherData 
 
             <button
               type="submit"
-              disabled={loading || (!input.trim() && attachedImages.length === 0)}
+              disabled={isReadOnlyConversation || loading || (!input.trim() && attachedImages.length === 0)}
               className={`inline-flex items-center justify-center gap-2 rounded-xl bg-green-600 font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50 ${
                 isCompact ? 'h-[44px] px-4 text-sm' : 'h-[48px] px-5'
               }`}

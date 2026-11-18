@@ -259,7 +259,14 @@ function App() {
       case 'monitoring':
         return <Monitoring />;
       case 'chat':
-        return <ChatPage sensorData={liveSensorData} settings={settings} weatherData={weatherData} />;
+        return (
+          <ChatPage
+            sensorData={liveSensorData}
+            settings={settings}
+            weatherData={weatherData}
+            onLogin={() => handlePageChange('login')}
+          />
+        );
       case 'control':
         return <ControlPage />;
       case 'weather':
@@ -305,7 +312,7 @@ function App() {
     );
   }
 
-  if (sensorLoading && !liveSensorData) {
+  if (sensorLoading && !liveSensorData && activePage !== 'login') {
     return (
       <div className="min-h-screen px-4 py-8 sm:px-6" aria-busy="true">
         <div className="mx-auto max-w-6xl space-y-6">

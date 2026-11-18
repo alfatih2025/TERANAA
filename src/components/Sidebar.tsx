@@ -8,7 +8,6 @@ import {
   FileText,
   Menu,
   X,
-  Sprout,
   Zap,
   BookOpen,
   Network,
@@ -123,7 +122,7 @@ export function Sidebar({ currentPage, onPageChange }: SidebarProps) {
               onClick={() => { onPageChange('login'); setMobileOpen(false); }}
               className="w-full py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition-colors flex items-center justify-center"
             >
-              Login Admin
+              Login dengan Google
             </button>
           )}
         </div>

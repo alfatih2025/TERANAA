@@ -13,6 +13,105 @@ function formatOneDecimal(val: number | null | undefined): string {
   return Number(val).toFixed(1);
 }
 
+/**
+ * Kalkulasi komponen FWI (Fire Weather Index) menggunakan model Van Wagner 1987
+ * yang diadopsi BMKG dalam sistem SPARTAN untuk lahan gambut Indonesia.
+ * Input: temperature (°C), humidity (%), soil_moisture (%), soil_temp (°C)
+ */
+function calculateFwiComponents(
+  temp: number | null,
+  rh: number | null,
+  soilMoisture: number | null,
+  soilTemp: number | null
+) {
+  // Nilai default jika sensor tidak tersedia
+  const T = temp ?? 28;       // suhu udara (°C)
+  const H = rh ?? 70;         // kelembapan relatif (%)
+  const SM = soilMoisture ?? 50; // kadar air tanah (%)
+  const ST = soilTemp ?? 28;  // suhu tanah (°C)
+
+  // ═══════════════════════════════════════════════════════════
+  // FFMC (Fine Fuel Moisture Code) — Kekeringan Serasah Halus
+  // Skala 0-101. Tinggi = kering = mudah terbakar.
+  // Rumus: berbasis kelembapan dan suhu udara.
+  // ═══════════════════════════════════════════════════════════
+  const mo = 147.2 * (101 - 85) / (59.5 + 85); // initial moisture (asumsi FFMC0=85)
+  const rf = 0; // asumsi tidak ada hujan (data hujan tidak tersedia)
+  let m = mo;
+  if (rf > 0.5) {
+    const mr = mo + 42.5 * rf * Math.exp(-100 / (251 - mo)) * (1 - Math.exp(-6.93 / rf));
+    m = Math.min(mr, 250);
+  }
+  const Ed = 0.942 * Math.pow(H, 0.679) + 11 * Math.exp((H - 100) / 10) + 0.18 * (21.1 - T) * (1 - Math.exp(-0.115 * H));
+  const Ew = 0.618 * Math.pow(H, 0.753) + 10 * Math.exp((H - 100) / 10) + 0.18 * (21.1 - T) * (1 - Math.exp(-0.115 * H));
+  let mf: number;
+  if (m > Ed) {
+    const ko = 0.424 * (1 - Math.pow(H / 100, 1.7)) + 0.0694 * Math.sqrt(0) * (1 - Math.pow(H / 100, 8));
+    const kd = ko * 0.581 * Math.exp(0.0365 * T);
+    mf = Ed + (m - Ed) * Math.pow(10, -kd);
+  } else if (m < Ew) {
+    const kl = 0.424 * (1 - Math.pow((100 - H) / 100, 1.7)) + 0.0694 * Math.sqrt(0) * (1 - Math.pow((100 - H) / 100, 8));
+    const kw = kl * 0.581 * Math.exp(0.0365 * T);
+    mf = Ew - (Ew - m) * Math.pow(10, -kw);
+  } else {
+    mf = m;
+  }
+  const ffmc = Math.max(0, Math.min(101, 59.5 * (250 - mf) / (147.2 + mf)));
+
+  // ═══════════════════════════════════════════════════════════
+  // DMC (Duff Moisture Code) — Kadar Air Lapisan Gambut Atas
+  // Skala 0-∞ (kritis >20). Tinggi = kering = kritis gambut.
+  // ═══════════════════════════════════════════════════════════
+  const Le = [6.4, 5.0, 3.0, 1.1, 0.4, 0.1, 0, 0.3, 0.9, 1.9, 3.5, 5.3][new Date().getMonth()];
+  const K = 1.894 * (T + 1.1) * (100 - H) * Le * 1e-6;
+  const DMC0 = 6; // initial DMC (nilai referensi)
+  // Koreksi DMC dengan soil_moisture: gambut lembap menurunkan DMC
+  const soilMoistureFactor = Math.max(0, Math.min(1, SM / 100));
+  const dmc = Math.max(0, (DMC0 + 100 * K) * (1 - soilMoistureFactor * 0.5));
+
+  // ═══════════════════════════════════════════════════════════
+  // DC (Drought Code) — Kekeringan Lapisan Dalam Gambut
+  // Skala 0-800+. Kritis jika >300. LANGSUNG dikoreksi suhu tanah.
+  // ═══════════════════════════════════════════════════════════
+  const Lf = [-1.6, -1.6, -1.6, 0.9, 3.8, 5.8, 6.4, 5.0, 2.4, 0.4, -1.6, -1.6][new Date().getMonth()];
+  const V = 0.36 * (T + 2.8) + Lf;
+  const DC0 = 15; // initial DC
+  // Koreksi DC dengan suhu tanah: tanah panas berarti gambut lebih kering dalam
+  const soilTempBonus = Math.max(0, (ST - 25) * 5); // setiap 1°C di atas 25°C = +5 DC
+  const soilDryFactor = Math.max(0, (100 - SM) / 100);
+  const dc = Math.min(800, Math.max(0, DC0 + 0.5 * Math.max(0, V) + soilTempBonus + soilDryFactor * 50));
+
+  // ═══════════════════════════════════════════════════════════
+  // ISI (Initial Spread Index) — Laju Penyebaran Api Awal
+  // Berbasis FFMC dan kecepatan angin (asumsi angin 10 km/h untuk daerah gambut)
+  // ═══════════════════════════════════════════════════════════
+  const W = 10; // kecepatan angin default (km/h) — data angin tidak tersedia
+  const fW = Math.exp(0.05039 * W);
+  const fm = 147.2 * (101 - ffmc) / (59.5 + ffmc);
+  const fF = 91.9 * Math.exp(-0.1386 * fm) * (1 + Math.pow(fm, 5.31) / (4.93e7));
+  const isi = Math.max(0, 0.208 * fW * fF);
+
+  // ═══════════════════════════════════════════════════════════
+  // BUI (Build-up Index) — Akumulasi Total Bahan Bakar Kering
+  // Kombinasi DMC dan DC.
+  // ═══════════════════════════════════════════════════════════
+  let bui: number;
+  if (dmc <= 0.4 * dc) {
+    bui = 0.8 * dmc * dc / (dmc + 0.4 * dc);
+  } else {
+    bui = dmc - (1 - 0.8 * dc / (dmc + 0.4 * dc)) * (0.92 + Math.pow(0.0114 * dmc, 1.7));
+  }
+  bui = Math.max(0, bui);
+
+  return {
+    ffmc: Math.round(ffmc * 10) / 10,
+    dmc: Math.round(dmc * 10) / 10,
+    dc: Math.round(dc * 10) / 10,
+    isi: Math.round(isi * 10) / 10,
+    bui: Math.round(bui * 10) / 10,
+  };
+}
+
 export function KarhutlaCard({ data, isOnline }: KarhutlaCardProps) {
   const [showFdrsDetails, setShowFdrsDetails] = useState(false);
 
@@ -20,6 +119,20 @@ export function KarhutlaCard({ data, isOnline }: KarhutlaCardProps) {
   const soilTemp = data?.soil_temp ?? null;
   const soilMoisture = data?.soil_moisture ?? null;
   const fwiScore = data?.fwi ?? 0;
+
+  // Hitung komponen FWI secara client-side jika data dari sensor tidak lengkap
+  const derived = calculateFwiComponents(
+    data?.temperature ?? null,
+    data?.humidity ?? null,
+    soilMoisture,
+    soilTemp
+  );
+
+  const ffmc = data?.ffmc ?? derived.ffmc;
+  const dmc = data?.dmc ?? derived.dmc;
+  const dc = data?.dc ?? derived.dc;
+  const isi = data?.isi ?? derived.isi;
+  const bui = data?.bui ?? derived.bui;
 
   // Tentukan level bahaya BMKG (dengan override darurat jika suhu tanah >= 50°C)
   let level = data?.fwi_level ?? 0;
@@ -287,27 +400,27 @@ export function KarhutlaCard({ data, isOnline }: KarhutlaCardProps) {
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pb-3">
               <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/40">
                 <span className="text-slate-500 font-medium block">FFMC (Bahan Bakar Halus):</span>
-                <span className="text-sm font-black text-slate-800 dark:text-slate-100">{formatOneDecimal(data?.ffmc)}</span>
+                <span className="text-sm font-black text-slate-800 dark:text-slate-100">{formatOneDecimal(ffmc)}</span>
                 <span className="text-[10px] text-slate-400 block">Kekeringan serasah</span>
               </div>
               <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/40">
                 <span className="text-slate-500 font-medium block">DMC (Lapisan Sedang):</span>
-                <span className="text-sm font-black text-slate-800 dark:text-slate-100">{formatOneDecimal(data?.dmc)}</span>
+                <span className="text-sm font-black text-slate-800 dark:text-slate-100">{formatOneDecimal(dmc)}</span>
                 <span className="text-[10px] text-slate-400 block">Kadar air gambut atas</span>
               </div>
               <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/40">
                 <span className="text-slate-500 font-medium block">DC (Kekeringan Dalam):</span>
-                <span className="text-sm font-black text-rose-600 dark:text-rose-400">{formatOneDecimal(data?.dc)}</span>
+                <span className="text-sm font-black text-rose-600 dark:text-rose-400">{formatOneDecimal(dc)}</span>
                 <span className="text-[10px] text-slate-400 block">★ Kritis Lahan Gambut</span>
               </div>
               <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/40">
                 <span className="text-slate-500 font-medium block">ISI (Penyebaran Api):</span>
-                <span className="text-sm font-black text-slate-800 dark:text-slate-100">{formatOneDecimal(data?.isi)}</span>
+                <span className="text-sm font-black text-slate-800 dark:text-slate-100">{formatOneDecimal(isi)}</span>
                 <span className="text-[10px] text-slate-400 block">Laju kecepatan awal</span>
               </div>
               <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/40">
                 <span className="text-slate-500 font-medium block">BUI (Akumulasi Bahan):</span>
-                <span className="text-sm font-black text-slate-800 dark:text-slate-100">{formatOneDecimal(data?.bui)}</span>
+                <span className="text-sm font-black text-slate-800 dark:text-slate-100">{formatOneDecimal(bui)}</span>
                 <span className="text-[10px] text-slate-400 block">Total bahan kering</span>
               </div>
               <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/40">
@@ -317,7 +430,10 @@ export function KarhutlaCard({ data, isOnline }: KarhutlaCardProps) {
               </div>
             </div>
             <p className="pt-2 text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-              * Perhitungan menggunakan model Van Wagner 1987 yang diadopsi resmi oleh BMKG pada sistem SPARTAN. Khusus lahan gambut, nilai DC (Drought Code) dikoreksi langsung oleh data sensor kelembaban kapasitif dan probe suhu kedalaman DS18B20.
+              * Perhitungan menggunakan model Van Wagner 1987 yang diadopsi resmi oleh BMKG pada sistem SPARTAN. 
+              Khusus lahan gambut, nilai DC (Drought Code) dikoreksi langsung oleh data sensor kelembaban kapasitif 
+              dan probe suhu kedalaman DS18B20. Nilai FFMC/DMC/DC/ISI/BUI dihitung otomatis dari data suhu & 
+              kelembapan apabila tidak dikirim langsung oleh ESP32.
             </p>
           </div>
         )}

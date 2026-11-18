@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Bot, Sparkles, Sprout, RefreshCw, Wifi, WifiOff, AlertTriangle, Leaf, Mic, MicOff, Image as ImageIcon, X, Volume2, VolumeX, Plus } from 'lucide-react';
+import { Send, Bot, Sparkles, Sprout, RefreshCw, Wifi, WifiOff, AlertTriangle, Leaf, Mic, MicOff, Image as ImageIcon, X, Volume2, VolumeX, Plus, Camera } from 'lucide-react';
 import { useChat } from '../hooks/useChat';
 import { useAuth } from '../hooks/useAuthContext';
 import { useVoiceRecognition } from '../hooks/useVoiceRecognition';
@@ -285,6 +285,7 @@ export function ChatInterface({ sensorData = null, settings = null, weatherData 
   const [activeSpeechId, setActiveSpeechId] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const { isListening, isSupported: isVoiceSupported, toggleListening, speakText, stopSpeaking } = useVoiceRecognition({
     lang: 'id-ID',
@@ -312,6 +313,23 @@ export function ChatInterface({ sensorData = null, settings = null, weatherData 
       reader.readAsDataURL(file);
     });
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleCameraCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    Array.from(files).forEach((file) => {
+      if (!file.type.startsWith('image/')) return;
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const result = event.target?.result as string;
+        if (result) {
+          setAttachedImages((prev) => [...prev, result]);
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+    if (cameraInputRef.current) cameraInputRef.current.value = '';
   };
 
   const removeAttachedImage = (index: number) => {
@@ -747,6 +765,15 @@ export function ChatInterface({ sensorData = null, settings = null, weatherData 
           className="hidden"
         />
 
+        <input
+          type="file"
+          ref={cameraInputRef}
+          accept="image/*"
+          capture="environment"
+          onChange={handleCameraCapture}
+          className="hidden"
+        />
+
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-2">
           <textarea
             value={input}
@@ -760,6 +787,17 @@ export function ChatInterface({ sensorData = null, settings = null, weatherData 
           />
 
           <div className="flex items-center gap-2 self-end sm:self-center">
+            <button
+              type="button"
+              onClick={() => cameraInputRef.current?.click()}
+              disabled={isReadOnlyConversation || loading}
+              className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-slate-600 transition hover:bg-slate-100 hover:text-green-600 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+              title="Ambil Foto dari Kamera"
+              aria-label="Ambil foto dari kamera langsung"
+            >
+              <Camera size={18} />
+            </button>
+
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}

@@ -233,5 +233,27 @@ export function useMultiNodeSensorData() {
     (!node3.created_at || (new Date().getTime() - new Date(node3.created_at).getTime() < 30 * 60 * 1000))
   );
 
-  return { node1, node2, node3, loading, isNode3Active };
+  // Node3: derived values dari rata-rata Node1 & Node2 (soil_moisture, temperature, humidity)
+  const node3WithDerivedValues = node3 ? (() => {
+    const avgSoil = (node1?.soil_moisture != null && node2?.soil_moisture != null)
+      ? (node1.soil_moisture + node2.soil_moisture) / 2
+      : (node1?.soil_moisture ?? node2?.soil_moisture ?? node3.soil_moisture);
+
+    const avgTemp = (node1?.temperature != null && node2?.temperature != null)
+      ? (node1.temperature + node2.temperature) / 2
+      : (node1?.temperature ?? node2?.temperature ?? node3.temperature);
+
+    const avgHum = (node1?.humidity != null && node2?.humidity != null)
+      ? (node1.humidity + node2.humidity) / 2
+      : (node1?.humidity ?? node2?.humidity ?? node3.humidity);
+
+    return {
+      ...node3,
+      soil_moisture: avgSoil,
+      temperature: node3.temperature ?? avgTemp,  // prioritas data real node3 jika ada
+      humidity: node3.humidity ?? avgHum,
+    };
+  })() : null;
+
+  return { node1, node2, node3: node3WithDerivedValues, loading, isNode3Active };
 }

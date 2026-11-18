@@ -198,6 +198,9 @@ export function AboutPage() {
           <div className="rounded-2xl border border-slate-200/60 bg-slate-50/70 p-5 dark:border-slate-800/60 dark:bg-slate-800/40">
             <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">Guru Pembimbing</span>
             <h4 className="mt-1 text-base font-bold text-slate-900 dark:text-white">Rifqi Setiawan, S.Pd.</h4>
+            <p className="mt-2 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              Pembimbing riset IoT, automasi mikrokontroler, dan arsitektur sistem embedded.
+            </p>
           </div>
 
           <div className="rounded-2xl border border-slate-200/60 bg-slate-50/70 p-5 dark:border-slate-800/60 dark:bg-slate-800/40">
@@ -209,7 +212,11 @@ export function AboutPage() {
               </li>
               <li className="flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-                <span>Ishar Bayu Ibroni</span>
+                <span>Raihan Andrean Maulana</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                <span>Ilham Hendro Saputro</span>
               </li>
             </ul>
           </div>

@@ -264,7 +264,6 @@ function App() {
             sensorData={liveSensorData}
             settings={settings}
             weatherData={weatherData}
-            onLogin={() => handlePageChange('login')}
           />
         );
       case 'control':

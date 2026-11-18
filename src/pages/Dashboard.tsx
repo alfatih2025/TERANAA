@@ -147,7 +147,7 @@ export function Dashboard({ sensorData, settings, weatherData }: DashboardProps)
       </div>
 
       {/* Node Cards Pertanian (Node 1 & Node 2) */}
-      <div className="grid grid-cols-1 gap-3 sm:gap-6 lg:grid-cols-2" aria-busy={loading}>
+      <div className="grid grid-cols-1 gap-3 sm:gap-6 lg:grid-cols-2">
         {loading && !node1 && !node2 ? (
           Array.from({ length: 2 }, (_, index) => (
             <div key={index} className="glass-card space-y-5 p-5" aria-hidden="true">
@@ -169,7 +169,7 @@ export function Dashboard({ sensorData, settings, weatherData }: DashboardProps)
 
       {/* Monitoring Card Khusus Karhutla (Jika diaktifkan atau sensor Node 3 aktif) */}
       {karhutlaEnabled && (
-        <div className="space-y-2">
+        <div className="space-y-2 animate-fadeIn">
           <KarhutlaCard data={node3} isOnline={isNode3Online} />
         </div>
       )}

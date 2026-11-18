@@ -274,8 +274,15 @@ export default async function handler(req, res) {
         .order('id', { ascending: false })
         .limit(5);
 
-      // Prioritaskan node tanaman (Node 2 atau Node 1) untuk metrik hortikultura dasar
-      const latestSensor = multiNode[2] || multiNode[1] || multiNode[3] || multiNode[0] || {};
+      // Deteksi node aktif (Node 3 aktif dengan telemetri riil di Supabase)
+      const isNode3Active = Boolean(multiNode[3]?.soil_temp != null || multiNode[3]?.temperature != null || multiNode[3]?.score != null);
+      const isNode1Active = Boolean(multiNode[1]?.temperature > 0 || multiNode[1]?.humidity > 0);
+      const isNode2Active = Boolean(multiNode[2]?.temperature > 0 || multiNode[2]?.humidity > 0);
+
+      // Prioritaskan Node 3 jika aktif karena Node 1 & 2 serta Gateway belum terpasang
+      const latestSensor = isNode3Active
+        ? multiNode[3]
+        : (isNode2Active ? multiNode[2] : (isNode1Active ? multiNode[1] : (multiNode[0] || {})));
 
       let trendSummary = '';
       if (Array.isArray(n3History) && n3History.length > 1) {

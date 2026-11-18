@@ -7,6 +7,18 @@ create table if not exists public.chat_conversations (
   updated_at timestamptz not null default now()
 );
 
+alter table public.chat_conversations
+  add column if not exists conversation_date date;
+
+update public.chat_conversations
+set conversation_date = (coalesce(created_at, now()) at time zone 'Asia/Jakarta')::date
+where conversation_date is null;
+
+alter table public.chat_conversations
+  alter column conversation_date
+    set default ((now() at time zone 'Asia/Jakarta')::date),
+  alter column conversation_date set not null;
+
 create index if not exists idx_chat_conversations_user_date
   on public.chat_conversations (user_id, conversation_date desc, created_at desc);
 

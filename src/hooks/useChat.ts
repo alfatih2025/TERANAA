@@ -225,6 +225,25 @@ export function useChat() {
     }
   }, [conversations, userId]);
 
+  const fetchMessages = useCallback(async () => {
+    if (!userId || !activeConversationId) return [];
+
+    const sequence = ++fetchSequence.current;
+    try {
+      const apiMessages = await fetchApiMessages(activeConversationId);
+      if (sequence === fetchSequence.current) {
+        setMessages(apiMessages);
+        setError(null);
+      }
+      return apiMessages;
+    } catch (fetchError) {
+      if (sequence === fetchSequence.current) {
+        setError(fetchError instanceof Error ? fetchError.message : 'Gagal mengambil riwayat chat');
+      }
+      return [];
+    }
+  }, [activeConversationId, userId]);
+
   const startNewConversation = useCallback(() => {
     if (!userId) return;
     const conversation = createConversation();

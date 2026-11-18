@@ -1,4 +1,5 @@
 import { createPublicKey, verify as verifySignature } from 'node:crypto';
+import supabase from './_supabase.js';
 
 const DEFAULT_HEADER_NAMES = ['authorization', 'x-api-key'];
 const FIREBASE_CERTS_URL = 'https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
@@ -157,16 +158,48 @@ export async function requireFirebaseAdmin(req, res) {
   const user = await requireFirebaseAuth(req, res);
   if (!user) return null;
 
-  const allowedEmails = (readEnv('FIREBASE_ADMIN_EMAILS') || 'alfatihwibowo264@gmail.com')
-    .split(',')
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean);
-  if (!allowedEmails.includes((user.email || '').toLowerCase())) {
+  if (!(await isFirebaseAdmin(user))) {
     authError(res, 'Akses administrator diperlukan');
     return null;
   }
 
   return user;
+}
+
+export async function isFirebaseAdmin(user) {
+  const email = String(user?.email || '').trim().toLowerCase();
+  if (!email) return false;
+
+  const ownerEmails = (readEnv('FIREBASE_ADMIN_EMAILS') || 'alfatihwibowo264@gmail.com')
+    .split(',')
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+  if (ownerEmails.includes(email)) return true;
+
+  try {
+    const { data, error } = await supabase
+      .from('app_admin_users')
+      .select('email')
+      .eq('email', email)
+      .maybeSingle();
+
+    if (error) {
+      console.error('[API Auth] Could not verify administrator role:', error.message);
+      return false;
+    }
+
+    return Boolean(data);
+  } catch (error) {
+    console.error('[API Auth] Could not verify administrator role:', error instanceof Error ? error.message : 'Unknown error');
+    return false;
+  }
+}
+
+export function getConfiguredAdminEmails() {
+  return (readEnv('FIREBASE_ADMIN_EMAILS') || 'alfatihwibowo264@gmail.com')
+    .split(',')
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
 }
 
 export function getAuthHeaders() {

@@ -1,25 +1,14 @@
-import { getOptionalFirebaseAuth, requireFirebaseAuth, authError } from '../lib/apiHelpers/_auth.js';
+import { requireFirebaseAuth } from '../lib/apiHelpers/_auth.js';
 import supabase from '../lib/apiHelpers/_supabase.js';
+import {
+  ensureChatConversation,
+  getJakartaDateRange,
+  insertChatMessage,
+  isConversationId,
+} from '../lib/apiHelpers/chatConversations.js';
 
 const OPENROUTER_API_KEY =
   process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_API_KEY;
-
-function getJakartaDateKey(date = new Date()) {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Jakarta',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(date);
-}
-
-function getJakartaDateRange(dateKey = getJakartaDateKey()) {
-  const start = new Date(`${dateKey}T00:00:00+07:00`);
-  const end = new Date(start);
-  end.setUTCDate(end.getUTCDate() + 1);
-  return { start: start.toISOString(), end: end.toISOString() };
-}
-
 
 const ARDUINO_FORMULA_REFERENCE = [
   'RUMUS ARDUINO NANO YANG WAJIB DIIKUTI:',
@@ -191,46 +180,70 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(204).end();
 
-  let authenticatedUser;
-  if (req.method === 'DELETE') {
-    authenticatedUser = await getOptionalFirebaseAuth(req, res);
-    if (res.headersSent) return;
-    if (!authenticatedUser) {
-      return res.status(200).json({ success: true, localOnly: true, date: getJakartaDateKey() });
-    }
-  } else {
-    authenticatedUser = await requireFirebaseAuth(req, res);
-    if (!authenticatedUser) return;
-  }
+  const authenticatedUser = await requireFirebaseAuth(req, res);
+  if (!authenticatedUser) return;
 
   try {
     if (req.method === 'GET') {
-      const { limit = 50 } = req.query;
-      const today = new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'Asia/Jakarta',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-      }).format(new Date());
-      const startOfDay = new Date(`${today}T00:00:00+07:00`).toISOString();
-      const startOfNextDay = new Date(`${today}T00:00:00+07:00`);
-      startOfNextDay.setUTCDate(startOfNextDay.getUTCDate() + 1);
+      const { limit = 50, conversationId } = req.query;
+      if (String(req.query?.list || '').toLowerCase() === 'conversations') {
+        const { data, error } = await supabase
+          .from('chat_conversations')
+          .select('id, title, conversation_date, created_at, updated_at')
+          .eq('user_id', authenticatedUser.uid)
+          .order('updated_at', { ascending: false })
+          .limit(200);
+        if (error) throw error;
+        return res.status(200).json(data || []);
+      }
+
+      if (!conversationId) {
+        const { data, error } = await supabase
+          .from('chat_messages')
+          .select('*')
+          .eq('user_id', authenticatedUser.uid)
+          .order('created_at', { ascending: false })
+          .limit(Math.min(Math.max(parseInt(limit, 10) || 50, 1), 500));
+        if (error) throw error;
+        return res.status(200).json(data || []);
+      }
+      if (!isConversationId(conversationId)) return res.status(400).json({ error: 'ID percakapan tidak valid.' });
+      const { data: conversation, error: conversationError } = await supabase
+        .from('chat_conversations')
+        .select('id, user_id, conversation_date')
+        .eq('id', conversationId)
+        .maybeSingle();
+      if (conversationError) throw conversationError;
+      if (!conversation) return res.status(200).json([]);
+      if (conversation.user_id !== authenticatedUser.uid) {
+        return res.status(404).json({ error: 'Percakapan tidak ditemukan.' });
+      }
+      const { start, end } = getJakartaDateRange(conversation.conversation_date);
       const { data, error } = await supabase
         .from('chat_messages')
         .select('*')
-        .gte('created_at', startOfDay)
-        .lt('created_at', startOfNextDay.toISOString())
+        .gte('created_at', start)
+        .lt('created_at', end)
         .eq('user_id', authenticatedUser.uid)
+        .eq('conversation_id', conversationId)
         .order('created_at', { ascending: true })
-        .limit(parseInt(limit, 10));
+        .limit(Math.min(Math.max(parseInt(limit, 10) || 50, 1), 500));
 
       if (error) throw error;
       return res.status(200).json(data);
     }
 
     if (req.method === 'POST') {
-      const { message, yesterdayHistory = null } = req.body || {};
+      const { message, conversationId, yesterdayHistory = null } = req.body || {};
       const user_id = authenticatedUser.uid;
+      if (typeof message !== 'string' || !message.trim()) {
+        return res.status(400).json({ error: 'Message is required' });
+      }
+      const conversation = await ensureChatConversation({
+        conversationId,
+        userId: user_id,
+        title: message,
+      });
 
       // Ambil data terbaru dari setiap node secara spesifik (0: Gateway, 1: Node 1, 2: Node 2, 3: Node 3)
       const nodeIds = [0, 1, 2, 3];
@@ -282,50 +295,13 @@ export default async function handler(req, res) {
 
       const userChatMetadata = buildChatMetadata(latestSensor, latestSettings || {}, 'user');
 
-      const safeInsertChatMessage = async (payload, fallbackSnapshots = {}) => {
-        try {
-          const res = await supabase.from('chat_messages').insert(payload).select().maybeSingle();
-          if (!res.error) return res;
-
-          if (res.error.code === 'PGRST204' || res.error.message?.includes('metadata')) {
-            const fallback = {
-              role: payload.role,
-              content: payload.content,
-              sensor_snapshot: fallbackSnapshots.sensor_snapshot || null,
-              settings_snapshot: fallbackSnapshots.settings_snapshot || null,
-            };
-            if (payload.user_id) fallback.user_id = payload.user_id;
-
-            const res2 = await supabase.from('chat_messages').insert(fallback).select().maybeSingle();
-            if (!res2.error) return res2;
-
-            if (res2.error.code === 'PGRST204' || res2.error.message?.includes('column')) {
-              return await supabase.from('chat_messages').insert({
-                role: payload.role,
-                content: payload.content,
-              }).select().maybeSingle();
-            }
-            return res2;
-          }
-          return res;
-        } catch (err) {
-          console.warn('[Chat] Supabase insert warning:', err?.message);
-          return { data: null, error: err };
-        }
-      };
-
-      await safeInsertChatMessage(
-        {
-          user_id,
-          role: 'user',
-          content: message,
-          metadata: userChatMetadata,
-        },
-        {
-          sensor_snapshot: userChatMetadata.sensor_snapshot,
-          settings_snapshot: userChatMetadata.settings_snapshot,
-        }
-      );
+      await insertChatMessage({
+        user_id,
+        conversation_id: conversation.id,
+        role: 'user',
+        content: message,
+        metadata: userChatMetadata,
+      });
 
       const systemPrompt = buildSystemPrompt(latestSensor, latestSettings || {}, yesterdayHistory, multiNode, trendSummary);
 
@@ -378,42 +354,45 @@ aiResponse = `Maaf, saya sedang kesulitan terhubung ke AI Online. ${error instan
       }
 
       const assistantMetadata = buildChatMetadata(latestSensor, latestSettings || {}, 'assistant');
-      const assistantMessage = await safeInsertChatMessage(
-        {
-          user_id: authenticatedUser.uid,
-          role: 'assistant',
-          content: aiResponse,
-          metadata: assistantMetadata,
-        },
-        {
-          sensor_snapshot: assistantMetadata.sensor_snapshot,
-          settings_snapshot: assistantMetadata.settings_snapshot,
-        }
-      );
+      const assistantMessage = await insertChatMessage({
+        user_id: authenticatedUser.uid,
+        conversation_id: conversation.id,
+        role: 'assistant',
+        content: aiResponse,
+        metadata: assistantMetadata,
+      });
+      await supabase
+        .from('chat_conversations')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', conversation.id)
+        .eq('user_id', authenticatedUser.uid);
 
       return res.status(200).json({
         success: true,
         message: aiResponse,
-        data: assistantMessage.data,
+        data: assistantMessage,
+        conversationId: conversation.id,
       });
     }
 
     if (req.method === 'DELETE') {
-      const { start, end } = getJakartaDateRange();
+      const conversationId = req.query?.conversationId || req.body?.conversationId;
+      if (!isConversationId(conversationId)) {
+        return res.status(400).json({ error: 'ID percakapan tidak valid.' });
+      }
       const { error } = await supabase
-        .from('chat_messages')
+        .from('chat_conversations')
         .delete()
-        .gte('created_at', start)
-        .lt('created_at', end)
+        .eq('id', conversationId)
         .eq('user_id', authenticatedUser.uid);
 
       if (error) throw error;
-      return res.status(200).json({ success: true, date: start.slice(0, 10) });
+      return res.status(200).json({ success: true });
     }
 
     return res.status(405).json({ error: 'Method not allowed' });
   } catch (error) {
-    return res.status(500).json({
+    return res.status(Number.isInteger(error?.statusCode) ? error.statusCode : 500).json({
       error: error instanceof Error ? error.message : 'Unknown chat error',
     });
   }

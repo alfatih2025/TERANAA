@@ -1,11 +1,41 @@
 import React, { useState, useEffect } from 'react';
 import { auth, db, googleAuthProvider } from '../lib/firebase';
 import { signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, setDoc, collection, onSnapshot, deleteDoc } from 'firebase/firestore';
+import { collection, getDocs } from 'firebase/firestore';
 import { AuthContext, type Role, type User } from './auth-context';
 
 export type { Role, User } from './auth-context';
-const OWNER_ADMIN_EMAIL = 'alfatihwibowo264@gmail.com';
+const LEGACY_OWNER_EMAIL = 'alfatihwibowo264@gmail.com';
+
+async function fetchAdminUsers(token: string) {
+  const response = await fetch('/api/admin-users', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || 'Gagal memverifikasi peran akun.');
+  return result;
+}
+
+async function migrateLegacyAdminInvites(token: string) {
+  const snapshot = await getDocs(collection(db, 'users'));
+  for (const userDoc of snapshot.docs) {
+    const data = userDoc.data();
+    const email = String(data.email || userDoc.id).trim().toLowerCase();
+    if (data.role !== 'admin' || !email.includes('@') || email === LEGACY_OWNER_EMAIL) continue;
+    const response = await fetch('/api/admin-users', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ email }),
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => null);
+      throw new Error(result?.error || `Gagal memigrasikan undangan ${email}.`);
+    }
+  }
+}
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
@@ -30,19 +60,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [authError, setAuthError] = useState<string>('');
 
   useEffect(() => {
-    if (currentUser?.role !== 'admin') return;
-    const unsubscribeUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
-      const usersData: User[] = [];
-      snapshot.forEach((d) => usersData.push(d.data() as User));
-      setUsers(usersData);
-    }, (error) => {
-      console.error('Gagal memuat daftar pengguna:', error);
-      setAuthError(`Gagal memuat daftar pengguna: ${error.message}`);
-    });
-    return () => unsubscribeUsers();
-  }, [currentUser?.role]);
-
-  useEffect(() => {
     // Tangkap hasil redirect login saat halaman dimuat kembali dari Google
     getRedirectResult(auth).then((result) => {
        if(result) {
@@ -55,48 +72,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setUsers([]);
+      setAuthError('');
+      setLoading(true);
       if (firebaseUser && firebaseUser.email) {
+        const signedInUser: User = {
+          id: firebaseUser.uid,
+          username: firebaseUser.displayName || firebaseUser.email.split('@')[0] || 'User',
+          email: firebaseUser.email,
+          role: 'user',
+        };
         try {
-          const docId = firebaseUser.email.toLowerCase();
-          const userDoc = await getDoc(doc(db, 'users', docId));
-          const isOwner = docId === OWNER_ADMIN_EMAIL;
-
-          if (userDoc.exists()) {
-            const data = userDoc.data();
-            const storedRole: Role = data.role === 'admin' ? 'admin' : 'user';
-            
-            if (isOwner && storedRole !== 'admin') {
-              await setDoc(doc(db, 'users', docId), { role: 'admin' }, { merge: true });
+          const token = await firebaseUser.getIdToken();
+          let result = await fetchAdminUsers(token);
+          if (signedInUser.email.toLowerCase() === LEGACY_OWNER_EMAIL && result.currentUser?.role === 'admin') {
+            try {
+              await migrateLegacyAdminInvites(token);
+              result = await fetchAdminUsers(token);
+            } catch (migrationError) {
+              console.warn('Gagal memigrasikan undangan administrator lama:', migrationError);
             }
-
-            setCurrentUser({
-              id: firebaseUser.uid,
-              username: data.username || data.email?.split('@')[0] || 'User',
-              email: data.email || firebaseUser.email,
-              role: isOwner || storedRole === 'admin' ? 'admin' : 'user'
-            });
-          } else {
-            const role: Role = isOwner ? 'admin' : 'user';
-            const newUser = {
-              id: firebaseUser.uid,
-              username: firebaseUser.email?.split('@')[0] || 'User',
-              email: firebaseUser.email,
-              role
-            };
-            if (isOwner) {
-              await setDoc(doc(db, 'users', docId), newUser);
-            }
-            setCurrentUser(newUser);
           }
-        } catch (firestoreError: unknown) {
-          console.error('Firestore Error saat login:', firestoreError);
-          setCurrentUser({
-            id: firebaseUser.uid,
-            username: firebaseUser.email?.split('@')[0] || 'User',
-            email: firebaseUser.email || '',
-            role: firebaseUser.email?.toLowerCase() === OWNER_ADMIN_EMAIL ? 'admin' : 'user'
-          });
-          setAuthError(`Peringatan Firestore: ${getErrorMessage(firestoreError)} (Login dilanjutkan di memori)`);
+
+          signedInUser.role = result.currentUser?.role === 'admin' ? 'admin' : 'user';
+          if (signedInUser.role === 'admin' && Array.isArray(result.users)) {
+            setUsers(result.users as User[]);
+          }
+          setCurrentUser(signedInUser);
+        } catch (roleError: unknown) {
+          console.error('Gagal memverifikasi peran akun:', roleError);
+          setCurrentUser(signedInUser);
+          setAuthError(`Akun masuk, tetapi peran administrator tidak dapat diverifikasi: ${getErrorMessage(roleError)}`);
         }
       } else {
         setCurrentUser(null);
@@ -140,30 +145,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const addUser = async (email: string, role: Role = 'user') => {
     try {
-      const docId = email.toLowerCase().trim();
-      const existing = await getDoc(doc(db, 'users', docId));
-      if (existing.exists()) return false;
-
-      await setDoc(doc(db, 'users', docId), {
-        id: `invited_${Date.now()}`,
-        username: email.split('@')[0],
-        email: docId,
-        role: role
+      if (role !== 'admin') return false;
+      const response = await fetch('/api/admin-users', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${await auth.currentUser?.getIdToken()}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email }),
       });
+      if (!response.ok) return false;
+      const result = await response.json();
+      setUsers((current) => [...current.filter((user) => user.email !== result.user.email), result.user as User]);
       return true;
     } catch (e) {
-      console.error("Gagal menambah user:", e);
+      console.error('Gagal menambah administrator:', e);
       return false;
     }
   };
 
   const removeUser = async (email: string) => {
     try {
-      // Kita hapus berdasarkan ID (yang aslinya adalah email di sistem baru ini)
-      // Namun berjaga-jaga jika ID-nya UID lama, kita query berdasarkan ID dokumen
-      await deleteDoc(doc(db, 'users', email));
+      const response = await fetch(`/api/admin-users?email=${encodeURIComponent(email)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${await auth.currentUser?.getIdToken()}` },
+      });
+      if (!response.ok) throw new Error((await response.json()).error || 'Gagal menghapus administrator.');
+      setUsers((current) => current.filter((user) => user.email !== email));
     } catch (e) {
-      console.error("Gagal menghapus user:", e);
+      console.error('Gagal menghapus administrator:', e);
     }
   };
 

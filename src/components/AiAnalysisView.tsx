@@ -1,11 +1,11 @@
-import { motion } from 'framer-motion';
-import { ShieldCheck, CheckCircle2, ChevronRight, Activity, Cpu, Bot, Route, Zap, Droplets, ThermometerSun, Leaf } from 'lucide-react';
+import { ShieldCheck, CheckCircle2, Activity, Cpu, Bot, Route, Zap, Droplets, ThermometerSun, Leaf } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import type { SensorData } from '../hooks/useSensorData';
 
-interface AiDecision {
+export interface AiDecision {
   decision: string;
   confidence: number;
-  recommendations: Array<{ label: string; value: string; icon?: any }>;
+  recommendations: Array<{ label: string; value: string; icon?: LucideIcon }>;
   analysis: string[];
   provider: string;
   model: string;

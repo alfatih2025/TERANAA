@@ -1,10 +1,22 @@
 import { useState, useEffect, useCallback } from 'react';
-import { buildApiHeaders } from '../lib/apiAuth';
+import { buildFirebaseAuthHeaders } from '../lib/apiAuth';
+import { useAuth } from './useAuthContext';
+
+interface MetricRange {
+  min?: number;
+  max?: number;
+}
+
+interface DailyHistoryMetrics {
+  temperature?: MetricRange;
+  humidity?: MetricRange;
+  soil_moisture?: MetricRange;
+}
 
 export interface DailyHistory {
   date: string;
   summary: string;
-  metrics: any;
+  metrics: DailyHistoryMetrics | null;
   insights: string;
   recommendations: string;
   messageCount: number;
@@ -17,6 +29,7 @@ export interface DailyHistory {
 }
 
 export function useDailyHistory() {
+  const { currentUser } = useAuth();
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [yesterdayHistory, setYesterdayHistory] = useState<DailyHistory | null>(null);
@@ -24,6 +37,7 @@ export function useDailyHistory() {
   const [selectedHistory, setSelectedHistory] = useState<DailyHistory | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const userId = currentUser?.id;
 
   /**
    * Ambil history untuk tanggal tertentu
@@ -35,7 +49,7 @@ export function useDailyHistory() {
 
       const query = target === 'today' || target === 'yesterday' ? `target=${target}` : `date=${encodeURIComponent(target)}`;
       const response = await fetch(`/api/chat-daily-history?${query}`, {
-        headers: buildApiHeaders(),
+        headers: await buildFirebaseAuthHeaders(),
       });
 
       const result = await response.json();
@@ -65,7 +79,7 @@ export function useDailyHistory() {
   }, []);
 
   const fetchAvailableDates = useCallback(async () => {
-    const response = await fetch('/api/chat-daily-history?list=dates', { headers: buildApiHeaders() });
+    const response = await fetch('/api/chat-daily-history?list=dates', { headers: await buildFirebaseAuthHeaders() });
     const result = await response.json();
     if (!response.ok || !Array.isArray(result.data)) throw new Error(result.error || 'Gagal mengambil tanggal histori');
     setAvailableDates(result.data);
@@ -78,76 +92,6 @@ export function useDailyHistory() {
   }, [fetchHistory]);
 
   /**
-   * Simpan atau generate daily history
-   */
-  const saveHistory = useCallback(async (date?: string, overrideData?: any) => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const response = await fetch('/api/chat-daily-history', {
-        method: 'POST',
-        headers: buildApiHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ date, overrideData }),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        setError(result.error || 'Gagal menyimpan riwayat');
-        return null;
-      }
-
-      return result.data as DailyHistory;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Terjadi kesalahan';
-      setError(message);
-      return null;
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  /**
-   * Update history tertentu
-   */
-  const updateHistory = useCallback(
-    async (date: string, updates: Partial<DailyHistory>) => {
-      try {
-        setLoading(true);
-        setError(null);
-
-        const response = await fetch('/api/chat-daily-history', {
-          method: 'PUT',
-          headers: buildApiHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({
-            date,
-            summary_text: updates.summary,
-            recommendations: updates.recommendations,
-            ai_insights: updates.insights,
-          }),
-        });
-
-        const result = await response.json();
-
-        if (!response.ok) {
-          setError(result.error || 'Gagal mengupdate riwayat');
-          return null;
-        }
-
-        return result.data as DailyHistory;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Terjadi kesalahan';
-        setError(message);
-        return null;
-      } finally {
-        setLoading(false);
-      }
-    },
-    [],
-  );
-
-  /**
    * Hapus history tertentu
    */
   const deleteHistory = useCallback(async (date: string) => {
@@ -157,7 +101,7 @@ export function useDailyHistory() {
 
       const response = await fetch(`/api/chat-daily-history?date=${date}`, {
         method: 'DELETE',
-        headers: buildApiHeaders(),
+        headers: await buildFirebaseAuthHeaders(),
       });
 
       const result = await response.json();
@@ -186,13 +130,35 @@ export function useDailyHistory() {
    * Load history on mount
    */
   useEffect(() => {
-    fetchAvailableDates().then((dates) => {
-      if (dates.length > 0) {
-        setSelectedDate(dates[0]);
-        void fetchHistory(dates[0]);
+    let active = true;
+    const loadHistory = async () => {
+      if (!userId) {
+        setAvailableDates([]);
+        setSelectedDate('');
+        setSelectedHistory(null);
+        setYesterdayHistory(null);
+        setTodayHistory(null);
+        return;
       }
-    }).catch((err) => setError(err instanceof Error ? err.message : 'Gagal mengambil tanggal histori'));
-  }, [fetchAvailableDates, fetchHistory]);
+
+      try {
+        const dates = await fetchAvailableDates();
+        if (!active) return;
+        if (dates.length > 0) {
+          setSelectedDate(dates[0]);
+          await fetchHistory(dates[0]);
+        } else {
+          setSelectedDate('');
+          setSelectedHistory(null);
+        }
+      } catch (err) {
+        if (active) setError(err instanceof Error ? err.message : 'Gagal mengambil tanggal histori');
+      }
+    };
+
+    void loadHistory();
+    return () => { active = false; };
+  }, [userId, fetchAvailableDates, fetchHistory]);
 
   const activeHistory = selectedDate ? selectedHistory : (selectedTarget === 'yesterday' ? yesterdayHistory : todayHistory);
   // Fallback: jika yang dipilih null tapi target lain ada datanya, gunakan yang ada
@@ -210,8 +176,6 @@ export function useDailyHistory() {
     loading,
     error,
     fetchHistory,
-    saveHistory,
-    updateHistory,
     deleteHistory,
   };
 }

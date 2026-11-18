@@ -68,6 +68,7 @@ async function verifyFirebaseIdToken(idToken) {
 
   const projectId = readEnv('FIREBASE_PROJECT_ID', 'VITE_FIREBASE_PROJECT_ID') || 'nexa-69000';
   const now = Math.floor(Date.now() / 1000);
+  const clockTolerance = 300; // 5 menit toleransi perbedaan jam antara server Vercel dan Google
   if (
     header.alg !== 'RS256' ||
     typeof header.kid !== 'string' ||
@@ -77,11 +78,11 @@ async function verifyFirebaseIdToken(idToken) {
     claims.sub.length === 0 ||
     claims.sub.length > 128 ||
     !Number.isFinite(claims.exp) ||
-    claims.exp <= now ||
+    claims.exp <= (now - clockTolerance) ||
     !Number.isFinite(claims.iat) ||
-    claims.iat > now ||
+    claims.iat > (now + clockTolerance) ||
     !Number.isFinite(claims.auth_time) ||
-    claims.auth_time > now
+    claims.auth_time > (now + clockTolerance)
   ) {
     return null;
   }

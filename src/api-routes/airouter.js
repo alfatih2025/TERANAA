@@ -204,31 +204,38 @@ export default async function handler(req, res) {
     });
 
     if (user && conversation) {
-      await insertChatMessage({
-        user_id: user.uid,
-        conversation_id: conversation.id,
-        role: 'user',
-        content: message,
-        metadata: { role: 'user', sensor_snapshot: sensorContext, settings_snapshot: aiSettings },
-      });
-      await insertChatMessage({
-        user_id: user.uid,
-        conversation_id: conversation.id,
-        role: 'assistant',
-        content: result.content || '',
-        metadata: { role: 'assistant', analysis: result.analysis },
-      });
-      await supabase
-        .from('chat_conversations')
-        .update({ updated_at: new Date().toISOString() })
-        .eq('id', conversation.id)
-        .eq('user_id', user.uid);
+      try {
+        await insertChatMessage({
+          user_id: user.uid,
+          conversation_id: conversation.id,
+          role: 'user',
+          content: message,
+          metadata: { role: 'user', sensor_snapshot: sensorContext, settings_snapshot: aiSettings },
+        });
+        await insertChatMessage({
+          user_id: user.uid,
+          conversation_id: conversation.id,
+          role: 'assistant',
+          content: result.content || '',
+          metadata: { role: 'assistant', analysis: result.analysis },
+        });
+        await supabase
+          .from('chat_conversations')
+          .update({ updated_at: new Date().toISOString() })
+          .eq('id', conversation.id)
+          .eq('user_id', user.uid);
+      } catch (dbSaveError) {
+        console.error('[AI Router] Warning: Gagal menyimpan pesan ke riwayat database:', dbSaveError);
+      }
     }
 
     return res.status(200).json({ ...result, conversationId: conversation?.id || null });
   } catch (error) {
-    return res.status(Number.isInteger(error?.statusCode) ? error.statusCode : 500).json({
-      error: error instanceof Error ? error.message : 'Unknown AI Router error',
-    });
+    const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
+    const message = error instanceof Error
+      ? error.message
+      : (error?.message || error?.details || error?.hint || JSON.stringify(error) || 'Unknown AI Router error');
+    console.error('[AI Router] Error:', message, error);
+    return res.status(statusCode).json({ error: message });
   }
 }

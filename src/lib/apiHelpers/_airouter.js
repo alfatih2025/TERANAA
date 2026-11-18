@@ -46,8 +46,15 @@ function readLocalEnv() {
 
 function getApiKey(provider) {
   const localEnv = readLocalEnv();
-  const envKey = `${provider.toUpperCase()}_API_KEY`;
-  return (process.env[envKey] || localEnv[envKey] || '').trim();
+  const p = provider.toUpperCase();
+  return (
+    process.env[`${p}_API_KEY`] ||
+    process.env[`VITE_${p}_API_KEY`] ||
+    process.env[`NEXT_PUBLIC_${p}_API_KEY`] ||
+    localEnv[`${p}_API_KEY`] ||
+    localEnv[`VITE_${p}_API_KEY`] ||
+    ''
+  ).trim();
 }
 
 function formatLine(label, value, suffix = '') {
@@ -274,7 +281,10 @@ async function callProvider(provider, model, messages, temperature, maxTokens, o
 
 function normalizeAiModel(provider, model) {
   if (provider !== 'gemini') return model;
-  if (['gemini-2.0-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-flash-lite-preview', 'gemini-2.5-pro', 'gemini-3.1-pro-preview'].includes(model)) return 'gemini-3.5-flash-lite';
+  // Pastikan model Gemini yang diminta valid dan tersedia di API Google Gemini
+  if (!model || model.includes('3.5') || model.includes('preview')) {
+    return 'gemini-1.5-flash';
+  }
   return model;
 }
 
@@ -301,11 +311,11 @@ export async function sendAiRouterMessage({
 }) {
   const settings = {
     ai_primary_provider: 'gemini',
-    ai_primary_model: 'gemini-3.5-flash-lite',
+    ai_primary_model: 'gemini-1.5-flash',
     ai_fallback_1_provider: 'openrouter',
     ai_fallback_1_model: 'qwen/qwen-2.5-72b-instruct',
     ai_fallback_2_provider: 'groq',
-    ai_fallback_2_model: 'openai/gpt-oss-120b',
+    ai_fallback_2_model: 'llama-3.3-70b-versatile',
     ai_temperature: 0.4,
     ai_max_tokens: 600,
     ...(aiSettings && typeof aiSettings === 'object' ? aiSettings : {}),

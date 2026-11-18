@@ -392,8 +392,11 @@ aiResponse = `Maaf, saya sedang kesulitan terhubung ke AI Online. ${error instan
 
     return res.status(405).json({ error: 'Method not allowed' });
   } catch (error) {
-    return res.status(Number.isInteger(error?.statusCode) ? error.statusCode : 500).json({
-      error: error instanceof Error ? error.message : 'Unknown chat error',
-    });
+    const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
+    const message = error instanceof Error
+      ? error.message
+      : (error?.message || error?.details || error?.hint || JSON.stringify(error) || 'Unknown chat error');
+    console.error('[Chat] Error:', message, error);
+    return res.status(statusCode).json({ error: message });
   }
 }

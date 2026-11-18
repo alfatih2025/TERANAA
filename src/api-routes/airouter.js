@@ -126,11 +126,28 @@ export default async function handler(req, res) {
     const n2 = dbNodes[2] || {};
     const n3 = dbNodes[3] || {};
 
-    // Deteksi status online hardware per node
-    const isNode1Online = Boolean(n1.id && (n1.temperature > 0 || n1.humidity > 0 || n1.soil_moisture > 0));
-    const isNode2Online = Boolean(n2.id && (n2.temperature > 0 || n2.humidity > 0 || n2.soil_moisture > 0));
-    const isNode3Online = Boolean(n3.id && (n3.soil_temp != null || n3.temperature != null || n3.humidity != null));
-    const isGatewayOnline = Boolean(n0.id && (n0.flow_rate > 0 || n0.total_water > 0 || n0.ph > 0));
+    // Deteksi status online hardware per node (konsisten dengan Dashboard)
+    const ONLINE_THRESHOLD_MS = 15 * 60 * 1000; // 15 menit
+    const isNode1Online = Boolean(
+      n1.id && n1.created_at &&
+      (Date.now() - new Date(n1.created_at).getTime() < ONLINE_THRESHOLD_MS) &&
+      ((n1.temperature != null && n1.temperature > 0) || (n1.humidity != null && n1.humidity > 0) || (n1.soil_moisture != null && n1.soil_moisture > 0))
+    );
+    const isNode2Online = Boolean(
+      n2.id && n2.created_at &&
+      (Date.now() - new Date(n2.created_at).getTime() < ONLINE_THRESHOLD_MS) &&
+      ((n2.temperature != null && n2.temperature > 0) || (n2.humidity != null && n2.humidity > 0) || (n2.soil_moisture != null && n2.soil_moisture > 0))
+    );
+    const isNode3Online = Boolean(
+      n3.id && n3.created_at &&
+      (Date.now() - new Date(n3.created_at).getTime() < ONLINE_THRESHOLD_MS) &&
+      (n3.soil_temp != null || n3.temperature != null || n3.humidity != null)
+    );
+    const isGatewayOnline = Boolean(
+      n0.id && n0.created_at &&
+      (Date.now() - new Date(n0.created_at).getTime() < ONLINE_THRESHOLD_MS) &&
+      ((n0.flow_rate != null && n0.flow_rate > 0) || (n0.total_water != null && n0.total_water > 0) || (n0.ph != null && n0.ph > 0))
+    );
 
     // Format riwayat time-series Node 3 (Karhutla & Suhu Gambut) dari Supabase
     const n3History = (n3HistRes?.data || []).map((r, idx) => {

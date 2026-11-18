@@ -1,4 +1,4 @@
-import { Thermometer, Droplets, Activity } from 'lucide-react';
+import { Thermometer, Droplets, Activity, Wifi, WifiOff } from 'lucide-react';
 import type { NodeSensorData } from '../hooks/useMultiNodeSensorData';
 import { timeAgo } from '../lib/timeUtils';
 
@@ -6,6 +6,7 @@ interface NodeCardProps {
   nodeName: string;
   nodeId: 1 | 2 | 3;
   data: NodeSensorData | null;
+  isOnline?: boolean;
 }
 
 function formatOneDecimal(value: number | null | undefined) {
@@ -13,7 +14,7 @@ function formatOneDecimal(value: number | null | undefined) {
   return Number(value).toFixed(1);
 }
 
-export function NodeCard({ nodeName, nodeId, data }: NodeCardProps) {
+export function NodeCard({ nodeName, nodeId, data, isOnline }: NodeCardProps) {
   const soilValue = data?.soil_moisture;
 
   return (
@@ -30,9 +31,27 @@ export function NodeCard({ nodeName, nodeId, data }: NodeCardProps) {
             <h2 className="text-lg sm:text-xl font-bold tracking-tight truncate">{nodeName}</h2>
           </div>
         </div>
-        <span className="shrink-0 rounded-full border border-green-200 bg-green-50 px-2.5 py-1 text-[10px] font-semibold text-green-700 dark:border-green-800/60 dark:bg-green-950/40 dark:text-green-300">
-          SENSOR IoT
-        </span>
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Online/Offline Badge */}
+          {isOnline !== undefined && (
+            <span
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold border ${
+                isOnline
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/60'
+                  : 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-800/60'
+              }`}
+            >
+              {isOnline ? (
+                <><Wifi className="w-2.5 h-2.5" /> ONLINE</>
+              ) : (
+                <><WifiOff className="w-2.5 h-2.5" /> OFFLINE</>
+              )}
+            </span>
+          )}
+          <span className="rounded-full border border-green-200 bg-green-50 px-2.5 py-1 text-[10px] font-semibold text-green-700 dark:border-green-800/60 dark:bg-green-950/40 dark:text-green-300">
+            SENSOR IoT
+          </span>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-3 sm:mb-6 relative z-10">

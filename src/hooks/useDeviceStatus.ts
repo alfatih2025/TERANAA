@@ -1,16 +1,26 @@
 import { useState, useEffect, useCallback } from 'react';
 
+export interface NodeStatus {
+  online: boolean;
+  last_seen: string | null;
+  wifi_status?: string | null;
+  device_id?: string | null;
+}
+
 export interface DeviceStatus {
   online: boolean;
+  gateway_online: boolean;
+  system_online: boolean;
+  nodes: Record<number, NodeStatus>;
+  // Legacy fields
   wifi_status: string;
-  last_update: string;
+  last_update: string | null;
   device_id: string;
   pump_status: boolean;
   feeder_status: boolean;
-  led_status?: boolean;
 }
 
-export function useDeviceStatus(pollInterval = 5000) {
+export function useDeviceStatus(pollInterval = 10000) {
   const [status, setStatus] = useState<DeviceStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

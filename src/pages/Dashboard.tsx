@@ -42,20 +42,31 @@ export function Dashboard({ sensorData, settings, weatherData }: DashboardProps)
     localStorage.setItem('terana_karhutla_mode', String(next));
   };
 
+  // Node 1 & 2 (Hortikultura): Online hanya jika ada data RIIL (bukan 0.0 dari sensor mati)
+  // DAN data diterima dalam 15 menit terakhir
   const isNode1Online = Boolean(
     node1 &&
-      (node1.temperature !== null || node1.humidity !== null || node1.soil_moisture !== null) &&
-      (!node1.created_at || new Date().getTime() - new Date(node1.created_at).getTime() < 15 * 60 * 1000)
+      node1.created_at &&
+      new Date().getTime() - new Date(node1.created_at).getTime() < 15 * 60 * 1000 &&
+      ((node1.temperature !== null && node1.temperature > 0) ||
+       (node1.humidity !== null && node1.humidity > 0) ||
+       (node1.soil_moisture !== null && node1.soil_moisture > 0))
   );
   const isNode2Online = Boolean(
     node2 &&
-      (node2.temperature !== null || node2.humidity !== null || node2.soil_moisture !== null) &&
-      (!node2.created_at || new Date().getTime() - new Date(node2.created_at).getTime() < 15 * 60 * 1000)
+      node2.created_at &&
+      new Date().getTime() - new Date(node2.created_at).getTime() < 15 * 60 * 1000 &&
+      ((node2.temperature !== null && node2.temperature > 0) ||
+       (node2.humidity !== null && node2.humidity > 0) ||
+       (node2.soil_moisture !== null && node2.soil_moisture > 0))
   );
+  // Node 3 (Gambut/Karhutla): Online jika ada data sensor (soil_temp, temp, hum, fwi)
+  // DAN data diterima dalam 15 menit terakhir
   const isNode3Online = Boolean(
     node3 &&
-      (node3.temperature !== null || node3.humidity !== null || node3.soil_moisture !== null || node3.soil_temp !== null || node3.fwi !== null) &&
-      (!node3.created_at || new Date().getTime() - new Date(node3.created_at).getTime() < 15 * 60 * 1000)
+      node3.created_at &&
+      new Date().getTime() - new Date(node3.created_at).getTime() < 15 * 60 * 1000 &&
+      (node3.soil_temp !== null || node3.temperature !== null || node3.humidity !== null || node3.fwi !== null)
   );
 
   const activeNodesCount = [isNode1Online, isNode2Online, karhutlaEnabled ? isNode3Online : false].filter(Boolean).length;
@@ -150,8 +161,8 @@ export function Dashboard({ sensorData, settings, weatherData }: DashboardProps)
           ))
         ) : (
           <>
-            <NodeCard nodeName="Wemos Node 1" nodeId={1} data={node1} />
-            <NodeCard nodeName="Wemos Node 2" nodeId={2} data={node2} />
+            <NodeCard nodeName="Wemos Node 1" nodeId={1} data={node1} isOnline={isNode1Online} />
+            <NodeCard nodeName="Wemos Node 2" nodeId={2} data={node2} isOnline={isNode2Online} />
           </>
         )}
       </div>

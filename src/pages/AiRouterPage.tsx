@@ -82,7 +82,23 @@ export function AiRouterPage() {
   };
 
   if (loading && !settings) {
-    return <div className="p-6 text-gray-600 dark:text-gray-300">Memuat konfigurasi AI...</div>;
+    return (
+      <div className="space-y-6 p-4 sm:p-6">
+        <div className="skeleton-shimmer h-8 w-60 rounded-xl" />
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="glass-card p-6 space-y-4">
+            <div className="skeleton-shimmer h-5 w-40 rounded-md" />
+            <div className="skeleton-shimmer h-10 w-full rounded-xl" />
+            <div className="skeleton-shimmer h-10 w-full rounded-xl" />
+          </div>
+          <div className="glass-card p-6 space-y-4">
+            <div className="skeleton-shimmer h-5 w-40 rounded-md" />
+            <div className="skeleton-shimmer h-10 w-full rounded-xl" />
+            <div className="skeleton-shimmer h-10 w-full rounded-xl" />
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (!isAdmin) {

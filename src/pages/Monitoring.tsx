@@ -183,10 +183,7 @@ export function Monitoring() {
           </h3>
           <span className="text-xs text-slate-500">Maksimum 60 rekaman terakhir</span>
         </div>
-        <div className="overflow-x-auto" aria-busy={loading && history.length === 0}>
-          {loading && history.length === 0 && (
-            <span className="sr-only" role="status">Memuat riwayat data...</span>
-          )}
+        <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-100 dark:bg-slate-900/50 text-slate-600 dark:text-slate-400">
               <tr>

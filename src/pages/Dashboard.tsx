@@ -19,7 +19,7 @@ export function Dashboard({ sensorData, settings, weatherData }: DashboardProps)
   const { node1, node2, node3, loading, isNode3Active } = useMultiNodeSensorData();
   const { mqttConnected } = useMqttStatus();
 
-  // Mode implementasi Karhutla: Aktif otomatis jika Node 3 mengirim data, atau diaktifkan manual oleh user
+  // Mode implementasi Karhutla: User memegang kendali penuh (tersimpan di localStorage)
   const [karhutlaEnabled, setKarhutlaEnabled] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('terana_karhutla_mode');
@@ -28,18 +28,14 @@ export function Dashboard({ sensorData, settings, weatherData }: DashboardProps)
     return false;
   });
 
-  // Jika Node 3 mengirim data riil secara otomatis aktifkan mode karhutla
-  useEffect(() => {
-    if (isNode3Active && !karhutlaEnabled) {
-      setKarhutlaEnabled(true);
-      localStorage.setItem('terana_karhutla_mode', 'true');
-    }
-  }, [isNode3Active, karhutlaEnabled]);
-
   const toggleKarhutlaMode = () => {
-    const next = !karhutlaEnabled;
-    setKarhutlaEnabled(next);
-    localStorage.setItem('terana_karhutla_mode', String(next));
+    setKarhutlaEnabled((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('terana_karhutla_mode', String(next));
+      } catch {}
+      return next;
+    });
   };
 
   // Node 1 & 2 (Hortikultura): Online hanya jika ada data RIIL (bukan 0.0 dari sensor mati)

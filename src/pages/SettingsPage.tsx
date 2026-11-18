@@ -257,7 +257,29 @@ export function SettingsPage() {
   };
 
   if (loading && !settings) {
-    return <div className="p-6 text-gray-600 dark:text-gray-300">Memuat pengaturan...</div>;
+    return (
+      <div className="space-y-6 p-4 sm:p-6">
+        <div className="flex items-center gap-3">
+          <div className="skeleton-shimmer h-8 w-8 rounded-lg" />
+          <div className="space-y-1.5">
+            <div className="skeleton-shimmer h-6 w-44 rounded-md" />
+            <div className="skeleton-shimmer h-4 w-72 rounded-md" />
+          </div>
+        </div>
+        <div className="grid gap-6 md:grid-cols-2">
+          <div className="glass-card p-6 space-y-4">
+            <div className="skeleton-shimmer h-5 w-36 rounded-md" />
+            <div className="skeleton-shimmer h-12 w-full rounded-xl" />
+            <div className="skeleton-shimmer h-12 w-full rounded-xl" />
+          </div>
+          <div className="glass-card p-6 space-y-4">
+            <div className="skeleton-shimmer h-5 w-36 rounded-md" />
+            <div className="skeleton-shimmer h-12 w-full rounded-xl" />
+            <div className="skeleton-shimmer h-12 w-full rounded-xl" />
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const humidityLow = formData.humidity_threshold_low ?? settings?.humidity_threshold_low ?? phaseProfile.humidityRange[0];

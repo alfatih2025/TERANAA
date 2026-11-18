@@ -300,7 +300,17 @@ export function LogsPage() {
 
           <div className="max-h-[760px] space-y-3 overflow-y-auto pr-1">
             {loading ? (
-              <div className="p-8 text-center text-gray-600 dark:text-gray-300">Memuat log...</div>
+              <div className="space-y-3 p-2">
+                {Array.from({ length: 4 }, (_, idx) => (
+                  <div key={idx} className="rounded-2xl border border-gray-100 p-4 dark:border-gray-800 space-y-2">
+                    <div className="flex justify-between items-center">
+                      <div className="skeleton-shimmer h-4 w-32 rounded-md" />
+                      <div className="skeleton-shimmer h-3 w-20 rounded-md" />
+                    </div>
+                    <div className="skeleton-shimmer h-4 w-full rounded-md" />
+                  </div>
+                ))}
+              </div>
             ) : filteredItems.length === 0 ? (
               <div className="p-8 text-center text-gray-600 dark:text-gray-300">Tidak ada histori untuk tanggal ini.</div>
             ) : (

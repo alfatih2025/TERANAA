@@ -25,9 +25,9 @@ import { useAuth } from './hooks/useAuthContext';
 
 function PageLoadingFallback() {
   return (
-    <div className="space-y-6 p-1" aria-busy="true">
-      <div className="skeleton-shimmer h-8 w-48 rounded-lg" aria-hidden="true" />
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-hidden="true">
+    <div className="space-y-6 p-1">
+      <div className="skeleton-shimmer h-8 w-48 rounded-lg" />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {Array.from({ length: 3 }, (_, index) => (
           <div key={index} className="glass-card space-y-4 p-5">
             <div className="skeleton-shimmer h-4 w-24 rounded-md" />
@@ -36,7 +36,6 @@ function PageLoadingFallback() {
           </div>
         ))}
       </div>
-      <p className="sr-only" role="status">Memuat halaman...</p>
     </div>
   );
 }
@@ -289,43 +288,50 @@ function App() {
     }
   };
 
-  // Tampilkan loading screen jika Auth masih diproses
+  // Tampilkan skeleton shimmer jika Auth masih diproses (tanpa spinner/teks memuat)
   if (authLoading) {
     return (
-      <div className="min-h-screen">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="flex min-h-screen flex-col items-center justify-center text-center"
-        >
-          <motion.div
-            animate={{ rotate: 360 }}
-            transition={{ repeat: Infinity, duration: 2, ease: 'linear' }}
-            className="mb-6 h-16 w-16 rounded-full border-4 border-slate-200 border-t-blue-500"
-          />
-          <div>
-            <h2 className="mb-2 text-xl font-bold text-slate-700">Memuat...</h2>
+      <div className="min-h-screen px-4 py-8 sm:px-6">
+        <div className="mx-auto max-w-6xl space-y-6">
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-2">
+              <div className="skeleton-shimmer h-7 w-36 rounded-lg" />
+              <div className="skeleton-shimmer h-4 w-52 rounded-md" />
+            </div>
+            <div className="skeleton-shimmer h-9 w-28 rounded-xl" />
           </div>
-        </motion.div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 3 }, (_, index) => (
+              <div key={index} className="glass-card space-y-5 p-5">
+                <div className="flex items-center justify-between">
+                  <div className="skeleton-shimmer h-4 w-24 rounded-md" />
+                  <div className="skeleton-shimmer h-10 w-10 rounded-xl" />
+                </div>
+                <div className="skeleton-shimmer h-9 w-32 rounded-lg" />
+                <div className="skeleton-shimmer h-3 w-20 rounded-md" />
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
 
   if (sensorLoading && !liveSensorData && activePage !== 'login') {
     return (
-      <div className="min-h-screen px-4 py-8 sm:px-6" aria-busy="true">
+      <div className="min-h-screen px-4 py-8 sm:px-6">
         <div className="mx-auto max-w-6xl space-y-6">
           <div className="flex items-center justify-between gap-4">
-            <div>
+            <div className="space-y-2">
               <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">TeraNova</h2>
-              <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">Memuat data sensor...</p>
+              <div className="skeleton-shimmer h-4 w-44 rounded-md" />
             </div>
-            <div className="skeleton-shimmer h-9 w-28 rounded-xl" aria-hidden="true" />
+            <div className="skeleton-shimmer h-9 w-28 rounded-xl" />
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {Array.from({ length: 3 }, (_, index) => (
-              <div key={index} className="glass-card space-y-5 p-5" aria-hidden="true">
+              <div key={index} className="glass-card space-y-5 p-5">
                 <div className="flex items-center justify-between">
                   <div className="skeleton-shimmer h-4 w-24 rounded-md" />
                   <div className="skeleton-shimmer h-10 w-10 rounded-xl" />
@@ -336,7 +342,7 @@ function App() {
             ))}
           </div>
 
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2" aria-hidden="true">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <div className="glass-card space-y-5 p-5">
               <div className="skeleton-shimmer h-5 w-36 rounded-md" />
               <div className="skeleton-shimmer h-48 w-full rounded-xl" />
@@ -346,8 +352,6 @@ function App() {
               <div className="skeleton-shimmer h-48 w-full rounded-xl" />
             </div>
           </div>
-
-          <p className="sr-only" role="status">Memuat data sensor...</p>
         </div>
       </div>
     );

@@ -86,8 +86,8 @@ export function WeatherMotionForecast({ data, loading, error, locationLabel }: W
               }).format(new Date())}
             </p>
             {loading && (
-              <div className="mt-3 inline-flex items-center rounded-full bg-white/15 px-3 py-1 text-xs font-medium text-white/90">
-                Memuat pembaruan cuaca...
+              <div className="mt-3">
+                <div className="skeleton-shimmer h-6 w-36 rounded-full bg-white/20" />
               </div>
             )}
           </div>

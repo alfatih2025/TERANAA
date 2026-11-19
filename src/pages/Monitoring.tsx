@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Activity, Flame } from 'lucide-react';
+import { Activity, Droplets, Flame } from 'lucide-react';
 import { SensorChart } from '../components/SensorChart';
 import type { NodeSensorData } from '../hooks/useMultiNodeSensorData';
 import { subscribeMqttStatus, getNodeSensorSnapshot } from '../services/mqtt';
@@ -56,7 +56,7 @@ export function Monitoring() {
       const snap = getNodeSensorSnapshot(activeNode);
       if (!snap) return;
 
-      const valueKey = `${snap.temperature}|${snap.humidity}|${snap.soil_moisture}|${snap.soil_temp}|${snap.fwi}`;
+      const valueKey = `${snap.temperature}|${snap.humidity}|${snap.soil_moisture}|${snap.soil_temp}|${snap.fwi}|${snap.ph}|${snap.flow_rate}|${snap.total_water}`;
       if (valueKey === lastValueKeyRef.current) return;
       lastValueKeyRef.current = valueKey;
 
@@ -69,6 +69,11 @@ export function Monitoring() {
           humidity: snap.humidity,
           soil_moisture: snap.soil_moisture,
           soil_temp: snap.soil_temp ?? null,
+          ph: snap.ph ?? null,
+          flow_rate: snap.flow_rate ?? null,
+          total_water: snap.total_water ?? null,
+          session_water: snap.session_water ?? null,
+          valve_status: snap.valve_status ?? null,
           fwi: snap.fwi ?? null,
           fwi_level: snap.fwi_level ?? null,
           fwi_status: snap.fwi_status ?? null,
@@ -92,15 +97,17 @@ export function Monitoring() {
           <div>
             <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Monitoring Real-time Multi-Node</h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              {activeNode === 3
-                ? 'Monitoring khusus sektor lahan gambut & sistem prediksi bahaya karhutla (BMKG FDRS)'
-                : 'Monitoring mikroklimat lahan pertanian hidroponik / bedeng'}
+              {activeNode === 0
+                ? 'Monitoring parameter stasiun ESP32 Gateway (pH tanah & debit aliran air irigasi presisi)'
+                : activeNode === 3
+                  ? 'Monitoring khusus sektor lahan gambut & sistem prediksi bahaya karhutla (BMKG FDRS)'
+                  : 'Monitoring mikroklimat lahan pertanian hidroponik / bedeng'}
             </p>
           </div>
         </div>
 
-        {/* Node Toggle: Node 1, Node 2, dan Node 3 Karhutla */}
-        <div className="flex flex-wrap rounded-2xl bg-slate-100 dark:bg-slate-800 p-1">
+        {/* Node Toggle: Node 1, Node 2, Node 3 Karhutla, dan Gateway */}
+        <div className="flex flex-wrap rounded-2xl bg-slate-100 dark:bg-slate-800 p-1 gap-1">
           <button
             onClick={() => setActiveNode(1)}
             className={`rounded-xl px-3.5 py-1.5 text-xs sm:text-sm font-bold transition-all ${
@@ -130,13 +137,45 @@ export function Monitoring() {
             }`}
           >
             <Flame className="w-3.5 h-3.5" />
-            Node 3 (Karhutla Gambut)
+            Node 3 (Karhutla)
+          </button>
+          <button
+            onClick={() => setActiveNode(0)}
+            className={`rounded-xl px-3.5 py-1.5 text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 ${
+              activeNode === 0
+                ? 'bg-emerald-600 text-white shadow-sm dark:bg-emerald-500 dark:text-slate-950'
+                : 'text-emerald-700 hover:text-emerald-800 dark:text-emerald-400 dark:hover:text-emerald-300'
+            }`}
+          >
+            <Droplets className="w-3.5 h-3.5" />
+            Gateway (pH & Irigasi)
           </button>
         </div>
       </div>
 
       {/* Grid Grafik Sensor */}
-      {activeNode === 3 ? (
+      {activeNode === 0 ? (
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 xl:grid-cols-3">
+          <SensorChart
+            data={history}
+            type="ph"
+            title="Tren Sensor pH Tanah (0 - 14)"
+            color="#0d9488"
+          />
+          <SensorChart
+            data={history}
+            type="flow_rate"
+            title="Tren Debit Aliran Air (Flow Rate L/min)"
+            color="#0284c7"
+          />
+          <SensorChart
+            data={history}
+            type="total_water"
+            title="Tren Akumulasi Volume Air (Liter)"
+            color="#10b981"
+          />
+        </div>
+      ) : activeNode === 3 ? (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 xl:grid-cols-3">
           <SensorChart
             data={history}
@@ -174,7 +213,12 @@ export function Monitoring() {
       <div className="glass-card overflow-hidden border border-slate-200 dark:border-slate-800">
         <div className="border-b border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-900/50 p-4 flex items-center justify-between">
           <h3 className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-            Riwayat Log Sensor (Node {activeNode})
+            Riwayat Log Sensor ({activeNode === 0 ? 'ESP32 Gateway' : `Node ${activeNode}`})
+            {activeNode === 0 && (
+              <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-bold border border-emerald-300">
+                Stasiun Kontrol Irigasi & pH
+              </span>
+            )}
             {activeNode === 3 && (
               <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200 font-bold border border-amber-300">
                 Zona Lahan Gambut
@@ -186,22 +230,33 @@ export function Monitoring() {
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-100 dark:bg-slate-900/50 text-slate-600 dark:text-slate-400">
-              <tr>
-                <th className="px-3 sm:px-6 py-3 font-medium text-xs sm:text-sm">Waktu</th>
-                <th className="px-3 sm:px-6 py-3 font-medium text-xs sm:text-sm">Suhu Udara (°C)</th>
-                <th className="px-3 sm:px-6 py-3 font-medium text-xs sm:text-sm">Lembap Udara (%)</th>
-                <th className="px-3 sm:px-6 py-3 font-medium text-xs sm:text-sm">Kadar Air Gambut/Tanah (%)</th>
-                {activeNode === 3 && (
-                  <>
-                    <th className="px-3 sm:px-6 py-3 font-medium text-xs sm:text-sm text-rose-600 dark:text-rose-400">
-                      Suhu Gambut (°C)
-                    </th>
-                    <th className="px-3 sm:px-6 py-3 font-medium text-xs sm:text-sm text-amber-600 dark:text-amber-400">
-                      FWI BMKG
-                    </th>
-                  </>
-                )}
-              </tr>
+              {activeNode === 0 ? (
+                <tr>
+                  <th className="px-3 sm:px-6 py-3 font-medium text-xs sm:text-sm">Waktu</th>
+                  <th className="px-3 sm:px-6 py-3 font-medium text-xs sm:text-sm text-teal-600 dark:text-teal-400">pH Tanah</th>
+                  <th className="px-3 sm:px-6 py-3 font-medium text-xs sm:text-sm text-blue-600 dark:text-blue-400">Debit Aliran (L/min)</th>
+                  <th className="px-3 sm:px-6 py-3 font-medium text-xs sm:text-sm">Volume Sesi (L)</th>
+                  <th className="px-3 sm:px-6 py-3 font-medium text-xs sm:text-sm font-bold text-slate-900 dark:text-white">Total Air (L)</th>
+                  <th className="px-3 sm:px-6 py-3 font-medium text-xs sm:text-sm">Status Katup</th>
+                </tr>
+              ) : (
+                <tr>
+                  <th className="px-3 sm:px-6 py-3 font-medium text-xs sm:text-sm">Waktu</th>
+                  <th className="px-3 sm:px-6 py-3 font-medium text-xs sm:text-sm">Suhu Udara (°C)</th>
+                  <th className="px-3 sm:px-6 py-3 font-medium text-xs sm:text-sm">Lembap Udara (%)</th>
+                  <th className="px-3 sm:px-6 py-3 font-medium text-xs sm:text-sm">Kadar Air Gambut/Tanah (%)</th>
+                  {activeNode === 3 && (
+                    <>
+                      <th className="px-3 sm:px-6 py-3 font-medium text-xs sm:text-sm text-rose-600 dark:text-rose-400">
+                        Suhu Gambut (°C)
+                      </th>
+                      <th className="px-3 sm:px-6 py-3 font-medium text-xs sm:text-sm text-amber-600 dark:text-amber-400">
+                        FWI BMKG
+                      </th>
+                    </>
+                  )}
+                </tr>
+              )}
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-800 bg-white light-card dark:bg-slate-950/50">
               {loading && history.length === 0 ? (
@@ -216,7 +271,7 @@ export function Monitoring() {
                 ))
               ) : history.length === 0 ? (
                 <tr>
-                  <td colSpan={activeNode === 3 ? 6 : 4} className="px-6 py-8 text-center text-slate-600 dark:text-slate-300">
+                  <td colSpan={activeNode === 0 ? 6 : activeNode === 3 ? 6 : 4} className="px-6 py-8 text-center text-slate-600 dark:text-slate-300">
                     Belum ada data sensor tercatat untuk node ini
                   </td>
                 </tr>
@@ -226,23 +281,53 @@ export function Monitoring() {
                     <td className="px-3 sm:px-6 py-2 sm:py-4 font-medium text-slate-900 dark:text-slate-200 text-xs sm:text-sm whitespace-nowrap">
                       {new Date(row.created_at).toLocaleString('id-ID')}
                     </td>
-                    <td className="px-3 sm:px-6 py-2 sm:py-4 text-slate-600 dark:text-slate-400 text-xs sm:text-sm">
-                      {row.temperature != null ? row.temperature.toFixed(1) : '-'}
-                    </td>
-                    <td className="px-3 sm:px-6 py-2 sm:py-4 text-slate-600 dark:text-slate-400 text-xs sm:text-sm">
-                      {row.humidity != null ? row.humidity.toFixed(1) : '-'}
-                    </td>
-                    <td className="px-3 sm:px-6 py-2 sm:py-4 text-slate-600 dark:text-slate-400 text-xs sm:text-sm font-semibold">
-                      {row.soil_moisture != null ? row.soil_moisture.toFixed(1) : '-'}
-                    </td>
-                    {activeNode === 3 && (
+                    {activeNode === 0 ? (
                       <>
-                        <td className="px-3 sm:px-6 py-2 sm:py-4 text-xs sm:text-sm font-bold text-rose-600 dark:text-rose-400">
-                          {row.soil_temp != null ? `${row.soil_temp.toFixed(1)} °C` : '-'}
+                        <td className="px-3 sm:px-6 py-2 sm:py-4 text-xs sm:text-sm font-bold text-teal-600 dark:text-teal-400">
+                          {row.ph != null ? row.ph.toFixed(2) : '-'}
                         </td>
-                        <td className="px-3 sm:px-6 py-2 sm:py-4 text-xs sm:text-sm font-black text-amber-600 dark:text-amber-400">
-                          {row.fwi != null ? row.fwi.toFixed(1) : '-'}
+                        <td className="px-3 sm:px-6 py-2 sm:py-4 text-xs sm:text-sm font-bold text-blue-600 dark:text-blue-400">
+                          {row.flow_rate != null ? row.flow_rate.toFixed(2) : '0.00'}
                         </td>
+                        <td className="px-3 sm:px-6 py-2 sm:py-4 text-slate-600 dark:text-slate-400 text-xs sm:text-sm">
+                          {row.session_water != null ? row.session_water.toFixed(2) : '-'}
+                        </td>
+                        <td className="px-3 sm:px-6 py-2 sm:py-4 text-slate-900 dark:text-white text-xs sm:text-sm font-black">
+                          {row.total_water != null ? row.total_water.toFixed(1) : '-'}
+                        </td>
+                        <td className="px-3 sm:px-6 py-2 sm:py-4 text-xs sm:text-sm">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            row.valve_status === 'IRIGASI'
+                              ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
+                              : row.valve_status === 'FERTIGASI'
+                                ? 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300'
+                                : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                          }`}>
+                            {row.valve_status || 'IDLE'}
+                          </span>
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="px-3 sm:px-6 py-2 sm:py-4 text-slate-600 dark:text-slate-400 text-xs sm:text-sm">
+                          {row.temperature != null ? row.temperature.toFixed(1) : '-'}
+                        </td>
+                        <td className="px-3 sm:px-6 py-2 sm:py-4 text-slate-600 dark:text-slate-400 text-xs sm:text-sm">
+                          {row.humidity != null ? row.humidity.toFixed(1) : '-'}
+                        </td>
+                        <td className="px-3 sm:px-6 py-2 sm:py-4 text-slate-600 dark:text-slate-400 text-xs sm:text-sm font-semibold">
+                          {row.soil_moisture != null ? row.soil_moisture.toFixed(1) : '-'}
+                        </td>
+                        {activeNode === 3 && (
+                          <>
+                            <td className="px-3 sm:px-6 py-2 sm:py-4 text-xs sm:text-sm font-bold text-rose-600 dark:text-rose-400">
+                              {row.soil_temp != null ? `${row.soil_temp.toFixed(1)} °C` : '-'}
+                            </td>
+                            <td className="px-3 sm:px-6 py-2 sm:py-4 text-xs sm:text-sm font-black text-amber-600 dark:text-amber-400">
+                              {row.fwi != null ? row.fwi.toFixed(1) : '-'}
+                            </td>
+                          </>
+                        )}
                       </>
                     )}
                   </tr>

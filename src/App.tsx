@@ -125,10 +125,10 @@ function App() {
       window.history.replaceState(null, '', path);
     }
   }, [activePage]);
-  const { node1, node2, node3, loading: sensorLoading } = useMultiNodeSensorData();
+  const { node1, node2, node3, gateway, loading: sensorLoading } = useMultiNodeSensorData();
   
   const liveSensorData = useMemo(() => {
-    if (!node1 && !node2 && !node3) return null;
+    if (!node1 && !node2 && !node3 && !gateway) return null;
     
     const gatewaySnap = getNodeSensorSnapshot(0);
 
@@ -141,17 +141,22 @@ function App() {
       soil_temp: node3?.soil_temp ?? null,
       fwi: node3?.fwi ?? null,
       fwi_status: node3?.fwi_status ?? null,
-      ph: gatewaySnap?.ph ?? null,
-      flow_rate: gatewaySnap?.flow_rate ?? null,
-      total_water: gatewaySnap?.total_water ?? null,
-      valve_status: gatewaySnap?.valve_status ?? null,
+      ph: gateway?.ph ?? gatewaySnap?.ph ?? null,
+      flow_rate: gateway?.flow_rate ?? gatewaySnap?.flow_rate ?? null,
+      total_water: gateway?.total_water ?? gatewaySnap?.total_water ?? null,
+      valve_status: gateway?.valve_status ?? gatewaySnap?.valve_status ?? null,
       node1: node1 ? { temp: node1.temperature, hum: node1.humidity, soil: node1.soil_moisture } : null,
       node2: node2 ? { temp: node2.temperature, hum: node2.humidity, soil: node2.soil_moisture } : null,
       node3: node3 ? { soil_temp: node3.soil_temp, temp: node3.temperature, hum: node3.humidity, fwi: node3.fwi, fwi_status: node3.fwi_status } : null,
-      gateway: gatewaySnap ? { ph: gatewaySnap.ph, flow_rate: gatewaySnap.flow_rate, total_water: gatewaySnap.total_water, valve_status: gatewaySnap.valve_status } : null,
+      gateway: (gateway || gatewaySnap) ? {
+        ph: gateway?.ph ?? gatewaySnap?.ph ?? null,
+        flow_rate: gateway?.flow_rate ?? gatewaySnap?.flow_rate ?? null,
+        total_water: gateway?.total_water ?? gatewaySnap?.total_water ?? null,
+        valve_status: gateway?.valve_status ?? gatewaySnap?.valve_status ?? null
+      } : null,
       created_at: node1?.created_at ?? node2?.created_at ?? node3?.created_at ?? new Date().toISOString(),
     };
-  }, [node1, node2, node3]);
+  }, [node1, node2, node3, gateway]);
 
   const health = useMemo(() => {
     if (!settings) return null;

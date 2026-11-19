@@ -3,6 +3,7 @@ import { MessageSquare, Network, Flame } from 'lucide-react';
 import { ChatInterface } from '../components/ChatInterface';
 import { NodeCard } from '../components/NodeCard';
 import { KarhutlaCard } from '../components/KarhutlaCard';
+import { GatewayCard } from '../components/GatewayCard';
 import { useMultiNodeSensorData } from '../hooks/useMultiNodeSensorData';
 import { SensorData } from '../hooks/useSensorData';
 import { Settings } from '../hooks/useSettings';
@@ -16,8 +17,8 @@ interface DashboardProps {
 }
 
 export function Dashboard({ sensorData, settings, weatherData }: DashboardProps) {
-  const { node1, node2, node3, loading, isNode3Active } = useMultiNodeSensorData();
-  const { mqttConnected } = useMqttStatus();
+  const { node1, node2, node3, gateway, loading, isNode3Active } = useMultiNodeSensorData();
+  const { mqttConnected, actuatorSnapshot, espOnline } = useMqttStatus();
 
   // Mode implementasi Karhutla: User memegang kendali penuh (tersimpan di localStorage)
   const [karhutlaEnabled, setKarhutlaEnabled] = useState<boolean>(() => {
@@ -60,9 +61,17 @@ export function Dashboard({ sensorData, settings, weatherData }: DashboardProps)
       new Date().getTime() - new Date(node3.created_at).getTime() < 15 * 60 * 1000 &&
       (node3.soil_temp !== null || node3.temperature !== null || node3.humidity !== null || node3.fwi !== null)
   );
+  // Gateway (Irigasi & pH): Online jika heartbeat MQTT terdeteksi atau ada data sensor masuk
+  const isGatewayOnline = Boolean(
+    espOnline ||
+      (gateway &&
+        gateway.created_at &&
+        new Date().getTime() - new Date(gateway.created_at).getTime() < 15 * 60 * 1000 &&
+        (gateway.ph !== null || gateway.flow_rate !== null || gateway.total_water !== null))
+  );
 
-  const activeNodesCount = [isNode1Online, isNode2Online, karhutlaEnabled ? isNode3Online : false].filter(Boolean).length;
-  const totalConfiguredNodes = karhutlaEnabled ? 3 : 2;
+  const activeNodesCount = [isNode1Online, isNode2Online, isGatewayOnline, karhutlaEnabled ? isNode3Online : false].filter(Boolean).length;
+  const totalConfiguredNodes = karhutlaEnabled ? 4 : 3;
 
   return (
     <div className="space-y-6 pb-8">
@@ -159,6 +168,11 @@ export function Dashboard({ sensorData, settings, weatherData }: DashboardProps)
         )}
       </div>
 
+      {/* Stasiun ESP32 Gateway: Monitoring Sensor pH & Waterflow Irigasi */}
+      <div className="space-y-2 animate-fadeIn">
+        <GatewayCard data={gateway} actuatorSnapshot={actuatorSnapshot} isOnline={isGatewayOnline} />
+      </div>
+
       {/* Monitoring Card Khusus Karhutla (Jika diaktifkan atau sensor Node 3 aktif) */}
       {karhutlaEnabled && (
         <div className="space-y-2 animate-fadeIn">
@@ -182,6 +196,7 @@ export function Dashboard({ sensorData, settings, weatherData }: DashboardProps)
                 {karhutlaEnabled && (
                   <th className="py-2 sm:py-3 px-2 sm:px-4 font-bold text-amber-600 dark:text-amber-400">Node 3 (Gambut)</th>
                 )}
+                <th className="py-2 sm:py-3 px-2 sm:px-4 font-bold text-emerald-600 dark:text-emerald-400">Gateway</th>
                 <th className="py-2 sm:py-3 px-2 sm:px-4 font-semibold text-slate-600 dark:text-slate-400">Catatan</th>
               </tr>
             </thead>
@@ -193,6 +208,7 @@ export function Dashboard({ sensorData, settings, weatherData }: DashboardProps)
                 {karhutlaEnabled && (
                   <td className="py-2 sm:py-3 px-2 sm:px-4">{node3?.temperature?.toFixed(1) || '--'} °C</td>
                 )}
+                <td className="py-2 sm:py-3 px-2 sm:px-4 text-slate-400">N/A</td>
                 <td className="py-2 sm:py-3 px-2 sm:px-4 text-slate-600 dark:text-slate-300">
                   {node1?.temperature && node2?.temperature ? 'ΔN1-N2: ' + Math.abs(node1.temperature - node2.temperature).toFixed(1) + ' °C' : '--'}
                 </td>
@@ -204,6 +220,7 @@ export function Dashboard({ sensorData, settings, weatherData }: DashboardProps)
                 {karhutlaEnabled && (
                   <td className="py-2 sm:py-3 px-2 sm:px-4">{node3?.humidity?.toFixed(1) || '--'} %</td>
                 )}
+                <td className="py-2 sm:py-3 px-2 sm:px-4 text-slate-400">N/A</td>
                 <td className="py-2 sm:py-3 px-2 sm:px-4 text-slate-600 dark:text-slate-300">
                   {node1?.humidity && node2?.humidity ? 'ΔN1-N2: ' + Math.abs(node1.humidity - node2.humidity).toFixed(1) + ' %' : '--'}
                 </td>
@@ -217,12 +234,72 @@ export function Dashboard({ sensorData, settings, weatherData }: DashboardProps)
                     {node3?.soil_moisture?.toFixed(1) || '--'} %
                   </td>
                 )}
+                <td className="py-2 sm:py-3 px-2 sm:px-4 text-slate-400">N/A</td>
                 <td className="py-2 sm:py-3 px-2 sm:px-4 text-slate-600 dark:text-slate-300">
                   {karhutlaEnabled && node3?.soil_moisture !== undefined && node3?.soil_moisture !== null
                     ? (node3.soil_moisture < 30 ? '⚠️ Gambut Kritis' : 'Normal')
                     : '--'}
                 </td>
               </tr>
+
+              {/* Baris Baru: pH Tanah */}
+              <tr className="hover:bg-slate-100 dark:hover:bg-slate-800/20 transition-colors bg-teal-50/40 dark:bg-teal-950/20">
+                <td className="py-2 sm:py-3 px-2 sm:px-4 font-bold text-teal-700 dark:text-teal-400">pH Tanah (Lokal)</td>
+                <td className="py-2 sm:py-3 px-2 sm:px-4 text-slate-400">N/A</td>
+                <td className="py-2 sm:py-3 px-2 sm:px-4 text-slate-400">N/A</td>
+                {karhutlaEnabled && (
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-slate-400">N/A</td>
+                )}
+                <td className="py-2 sm:py-3 px-2 sm:px-4 font-black text-teal-700 dark:text-teal-300">
+                  {gateway?.ph != null || actuatorSnapshot?.ph != null
+                    ? `${((gateway?.ph ?? actuatorSnapshot?.ph)!).toFixed(2)}`
+                    : '--'}
+                </td>
+                <td className="py-2 sm:py-3 px-2 sm:px-4 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  {(() => {
+                    const val = gateway?.ph ?? actuatorSnapshot?.ph;
+                    if (val == null) return '--';
+                    if (val < 5.8) return '⚠️ Asam (Butuh Amelioran)';
+                    if (val <= 7.2) return '✅ Ideal (Nutrisi Optimal)';
+                    return '⚠️ Basa (Alkali)';
+                  })()}
+                </td>
+              </tr>
+
+              {/* Baris Baru: Debit Aliran Air */}
+              <tr className="hover:bg-slate-100 dark:hover:bg-slate-800/20 transition-colors bg-blue-50/40 dark:bg-blue-950/20">
+                <td className="py-2 sm:py-3 px-2 sm:px-4 font-bold text-blue-700 dark:text-blue-400">Debit Aliran Irigasi</td>
+                <td className="py-2 sm:py-3 px-2 sm:px-4 text-slate-400">N/A</td>
+                <td className="py-2 sm:py-3 px-2 sm:px-4 text-slate-400">N/A</td>
+                {karhutlaEnabled && (
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-slate-400">N/A</td>
+                )}
+                <td className="py-2 sm:py-3 px-2 sm:px-4 font-black text-blue-600 dark:text-blue-400">
+                  {(gateway?.flow_rate ?? actuatorSnapshot?.flowRate ?? 0).toFixed(2)} L/min
+                </td>
+                <td className="py-2 sm:py-3 px-2 sm:px-4 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  {(gateway?.flow_rate ?? actuatorSnapshot?.flowRate ?? 0) > 0.05
+                    ? '💧 Irigasi/Fertigasi Mengalir'
+                    : 'Katup Siaga'}
+                </td>
+              </tr>
+
+              {/* Baris Baru: Total Air Tersiram */}
+              <tr className="hover:bg-slate-100 dark:hover:bg-slate-800/20 transition-colors">
+                <td className="py-2 sm:py-3 px-2 sm:px-4 font-medium">Total Konsumsi Air</td>
+                <td className="py-2 sm:py-3 px-2 sm:px-4 text-slate-400">N/A</td>
+                <td className="py-2 sm:py-3 px-2 sm:px-4 text-slate-400">N/A</td>
+                {karhutlaEnabled && (
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-slate-400">N/A</td>
+                )}
+                <td className="py-2 sm:py-3 px-2 sm:px-4 font-bold text-slate-800 dark:text-slate-100">
+                  {(gateway?.total_water ?? actuatorSnapshot?.totalLiters ?? 0).toFixed(1)} L
+                </td>
+                <td className="py-2 sm:py-3 px-2 sm:px-4 text-slate-500 text-xs">
+                  Sesi ini: {(gateway?.session_water ?? actuatorSnapshot?.currentLiters ?? 0).toFixed(2)} L
+                </td>
+              </tr>
+
               {karhutlaEnabled && (
                 <tr className="hover:bg-slate-100 dark:hover:bg-slate-800/20 transition-colors bg-amber-50/40 dark:bg-amber-950/20">
                   <td className="py-2 sm:py-3 px-2 sm:px-4 font-bold text-amber-700 dark:text-amber-400">Suhu Tanah (Bawah Permukaan)</td>
@@ -231,6 +308,7 @@ export function Dashboard({ sensorData, settings, weatherData }: DashboardProps)
                   <td className="py-2 sm:py-3 px-2 sm:px-4 font-black text-rose-600 dark:text-rose-400">
                     {node3?.soil_temp ? `${node3.soil_temp.toFixed(1)} °C` : '--'}
                   </td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-slate-400">N/A</td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 text-xs font-semibold text-amber-700 dark:text-amber-400">
                     {node3?.soil_temp && node3.soil_temp >= 50 ? '🚨 SMOLDERING ACTIVE' : 'Sensor DS18B20'}
                   </td>

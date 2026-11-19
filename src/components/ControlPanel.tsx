@@ -3,6 +3,8 @@ import { Bot, CirclePower, Droplets, FlaskConical, Hand, Radio } from 'lucide-re
 import type { LucideIcon } from 'lucide-react';
 import { useControl } from '../hooks/useControl';
 import { useMqttStatus } from '../hooks/useMqttStatus';
+import { useMultiNodeSensorData } from '../hooks/useMultiNodeSensorData';
+import { GatewayCard } from './GatewayCard';
 
 type Feedback = { tone: 'success' | 'error'; message: string } | null;
 type ActuatorKey = 'irrigation' | 'fertigation';
@@ -128,6 +130,7 @@ function ActuatorCard({
 export function ControlPanel() {
   const { sendCommand } = useControl();
   const { actuatorSnapshot, espOnline } = useMqttStatus();
+  const { gateway } = useMultiNodeSensorData();
   const [modeFeedback, setModeFeedback] = useState<Feedback>(null);
   const [actuatorFeedback, setActuatorFeedback] = useState<Record<ActuatorKey, Feedback>>({
     irrigation: null,
@@ -255,6 +258,9 @@ export function ControlPanel() {
           )}
         </div>
       </section>
+
+      {/* Monitoring Real-time pH & Aliran Air Irigasi Gateway */}
+      <GatewayCard data={gateway} actuatorSnapshot={actuatorSnapshot} isOnline={espOnline} />
 
       <div className="grid gap-6 xl:grid-cols-2">
         <ActuatorCard

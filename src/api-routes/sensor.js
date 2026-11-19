@@ -17,6 +17,11 @@ function normalizeRow(row) {
     humidity: toNumber(row.humidity, null),
     soil_moisture: toNumber(row.soil_moisture ?? row.soil, null),
     soil_temp: toNumber(row.soil_temp ?? row.battery, null),
+    ph: toNumber(row.ph, null),
+    flow_rate: toNumber(row.flow_rate, null),
+    total_water: toNumber(row.total_water ?? row.total_liters, null),
+    session_water: toNumber(row.session_water ?? row.session_liters, null),
+    valve_status: typeof row.valve_status === 'string' ? row.valve_status : (typeof row.active_valve === 'string' ? row.active_valve : null),
     fwi: toNumber(row.fwi, null),
     fwi_level: toNumber(row.fwi_level, null),
     fwi_status: typeof row.fwi_status === 'string' ? row.fwi_status : null,
@@ -122,7 +127,7 @@ export default async function handler(req, res) {
       const { limit = 100, latest, node_id } = req.query;
 
       if (latest === 'nodes' || latest === 'per-node') {
-        const nodeIds = [1, 2, 3];
+        const nodeIds = [0, 1, 2, 3];
         const results = await Promise.all(
           nodeIds.map(async (nId) => {
             try {
@@ -137,7 +142,7 @@ export default async function handler(req, res) {
               
               // Pilih baris terbaru yang memiliki data sensor nyata
               const validRow = Array.isArray(data) 
-                ? (data.find(r => r.temperature != null || r.humidity != null || r.soil_moisture != null || r.score != null) || data[0])
+                ? (data.find(r => r.temperature != null || r.humidity != null || r.soil_moisture != null || r.score != null || r.ph != null || r.flow_rate != null) || data[0])
                 : data;
               return validRow ? normalizeRow(validRow) : null;
             } catch {

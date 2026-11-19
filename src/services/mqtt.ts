@@ -114,6 +114,11 @@ export interface MqttActuatorSnapshot {
   pompa: boolean | null;
   mode: 'manual' | 'auto' | null;
   activeValve: string | null;
+  ph?: number | null;
+  flowRate?: number | null;
+  currentLiters?: number | null;
+  totalLiters?: number | null;
+  targetLiters?: number | null;
   updatedAt: string | null;
   sourceTopic: string | null;
 }
@@ -173,6 +178,32 @@ const emptySensorSnapshot: MqttSensorSnapshot = {
   sourceTopic: null,
 };
 
+function getInitialSavedActuator(): MqttActuatorSnapshot {
+  const fallback: MqttActuatorSnapshot = {
+    irigasi: false,
+    fertigasi: false,
+    pompa: false,
+    mode: getInitialSavedMode(),
+    activeValve: 'IDLE',
+    ph: null,
+    flowRate: 0,
+    currentLiters: 0,
+    totalLiters: 0,
+    targetLiters: null,
+    updatedAt: null,
+    sourceTopic: null,
+  };
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const saved = localStorage.getItem('teranova_gateway_actuator');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      return { ...fallback, ...parsed };
+    }
+  } catch {}
+  return fallback;
+}
+
 const defaultSnapshot = (): MqttStatusSnapshot => ({
   brokerUrl: BROKER_URL,
   browserOnline: typeof navigator === 'undefined' ? true : navigator.onLine,
@@ -191,28 +222,12 @@ const defaultSnapshot = (): MqttStatusSnapshot => ({
   webPublishedAt: null,
   subscribedTopics: SUBSCRIBE_TOPICS,
   sensorSnapshot: null,
-  actuatorSnapshot: {
-    irigasi: false,
-    fertigasi: false,
-    pompa: false,
-    mode: getInitialSavedMode(),
-    activeValve: 'IDLE',
-    updatedAt: null,
-    sourceTopic: null,
-  },
+  actuatorSnapshot: getInitialSavedActuator(),
 });
 
 let snapshot: MqttStatusSnapshot = defaultSnapshot();
 let sensorSnapshot: MqttSensorSnapshot | null = null;
-let actuatorSnapshot: MqttActuatorSnapshot | null = {
-  irigasi: false,
-  fertigasi: false,
-  pompa: false,
-  mode: getInitialSavedMode(),
-  activeValve: 'IDLE',
-  updatedAt: null,
-  sourceTopic: null,
-};
+let actuatorSnapshot: MqttActuatorSnapshot | null = getInitialSavedActuator();
 let sensorSnapshotByNode: Map<number, MqttSensorSnapshot> = new Map();
 let sensorHistory: MqttSensorSnapshot[] = [];
 let reconnectTimer: number | null = null;
@@ -608,12 +623,38 @@ function parseActuatorStatusPayload(payload: string): Partial<Omit<MqttActuatorS
   const activeValve = typeof parsed.active_valve === 'string'
     ? parsed.active_valve.trim().toUpperCase()
     : undefined;
+  const ph = parseNumeric(parsed.ph);
+  const flowRate = parseNumeric(parsed.flow_rate ?? parsed.flow);
+  const currentLiters = parseNumeric(parsed.current_liters ?? parsed.session_liters ?? parsed.session_water);
+  const totalLiters = parseNumeric(parsed.total_liters ?? parsed.total_water);
+  const targetLiters = parseNumeric(parsed.target_liters ?? parsed.target_water);
 
-  if (irigasi === undefined && fertigasi === undefined && pompa === undefined && mode === undefined && activeValve === undefined) {
+  if (
+    irigasi === undefined &&
+    fertigasi === undefined &&
+    pompa === undefined &&
+    mode === undefined &&
+    activeValve === undefined &&
+    ph === null &&
+    flowRate === null &&
+    currentLiters === null &&
+    totalLiters === null
+  ) {
     return null;
   }
 
-  return { irigasi, fertigasi, pompa, mode, activeValve };
+  return {
+    irigasi,
+    fertigasi,
+    pompa,
+    mode,
+    activeValve,
+    ph: ph ?? undefined,
+    flowRate: flowRate ?? undefined,
+    currentLiters: currentLiters ?? undefined,
+    totalLiters: totalLiters ?? undefined,
+    targetLiters: targetLiters ?? undefined,
+  };
 }
 
 function setActuatorSnapshot(
@@ -626,6 +667,11 @@ function setActuatorSnapshot(
     pompa: null,
     mode: null,
     activeValve: null,
+    ph: null,
+    flowRate: null,
+    currentLiters: null,
+    totalLiters: null,
+    targetLiters: null,
     updatedAt: null,
     sourceTopic: null,
   };
@@ -637,13 +683,21 @@ function setActuatorSnapshot(
     pompa: next.pompa ?? previous.pompa,
     mode: next.mode ?? previous.mode,
     activeValve: next.activeValve ?? previous.activeValve,
+    ph: next.ph !== undefined ? next.ph : previous.ph,
+    flowRate: next.flowRate !== undefined ? next.flowRate : previous.flowRate,
+    currentLiters: next.currentLiters !== undefined ? next.currentLiters : previous.currentLiters,
+    totalLiters: next.totalLiters !== undefined ? next.totalLiters : previous.totalLiters,
+    targetLiters: next.targetLiters !== undefined ? next.targetLiters : previous.targetLiters,
     updatedAt: new Date().toISOString(),
     sourceTopic,
   };
 
-  if (actuatorSnapshot.mode && typeof window !== 'undefined') {
+  if (typeof window !== 'undefined') {
     try {
-      localStorage.setItem('teranova_control_mode', actuatorSnapshot.mode);
+      if (actuatorSnapshot.mode) {
+        localStorage.setItem('teranova_control_mode', actuatorSnapshot.mode);
+      }
+      localStorage.setItem('teranova_gateway_actuator', JSON.stringify(actuatorSnapshot));
     } catch {
       // ignore
     }
@@ -764,10 +818,48 @@ function updateFromTopic(topic: string, payload: string) {
     if (mode !== undefined) setActuatorSnapshot({ mode }, topic);
   }
 
+  if (topic === TOPIC_FLOW) {
+    const parsed = normalizeJsonSensorPayload(payload);
+    if (parsed) {
+      setSensorSnapshot(parsed, topic, false);
+      setActuatorSnapshot({
+        flowRate: parsed.flow_rate,
+        currentLiters: parsed.session_water,
+        totalLiters: parsed.total_water,
+        activeValve: parsed.valve_status ?? undefined,
+      }, topic);
+      setSnapshot({
+        lastTopic: topic,
+        lastPayload: payload,
+        lastMessageAt: now,
+      });
+    }
+    return;
+  }
+
+  if (topic === TOPIC_PH) {
+    let phVal: number | null = null;
+    try {
+      const obj = JSON.parse(trimmed);
+      if (typeof obj === 'number') phVal = obj;
+      else if (obj && typeof obj === 'object') phVal = parseNumeric(obj.ph);
+    } catch {
+      phVal = parseNumeric(trimmed);
+    }
+    if (phVal != null) {
+      setSensorSnapshot({ node_id: 0, ph: phVal, device_id: 'ESP32_Gateway' }, topic, false);
+      setActuatorSnapshot({ ph: phVal }, topic);
+      setSnapshot({
+        lastTopic: topic,
+        lastPayload: payload,
+        lastMessageAt: now,
+      });
+    }
+    return;
+  }
+
   if (
     topic === TOPIC_SENSOR_JSON ||
-    topic === TOPIC_PH ||
-    topic === TOPIC_FLOW ||
     topic === TOPIC_KARHUTLA_FWI ||
     topic === TOPIC_KARHUTLA_ALERT ||
     topic.startsWith('sproutai/sensor/node/')
@@ -775,6 +867,10 @@ function updateFromTopic(topic: string, payload: string) {
     const parsed = normalizeJsonSensorPayload(payload);
     if (parsed) {
       setSensorSnapshot(parsed, topic, false);
+      if (parsed.node_id === 0) {
+        if (parsed.ph != null) setActuatorSnapshot({ ph: parsed.ph }, topic);
+        if (parsed.flow_rate != null) setActuatorSnapshot({ flowRate: parsed.flow_rate }, topic);
+      }
       setSnapshot({
         lastTopic: topic,
         lastPayload: payload,

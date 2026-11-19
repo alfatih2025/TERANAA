@@ -12,7 +12,7 @@ import { SensorData } from '../hooks/useSensorData';
 
 interface SensorChartProps {
   data: any[];
-  type: 'temperature' | 'humidity' | 'soil_moisture' | 'soil_temp' | 'fwi';
+  type: 'temperature' | 'humidity' | 'soil_moisture' | 'soil_temp' | 'fwi' | 'ph' | 'flow_rate' | 'total_water';
   title: string;
   color: string;
 }
@@ -23,6 +23,9 @@ const typeConfig: Record<string, { label: string; min: number; max: number }> = 
   soil_moisture: { label: 'Kadar Air Tanah (%)', min: 0, max: 100 },
   soil_temp: { label: 'Suhu Kedalaman Tanah (°C)', min: 15, max: 65 },
   fwi: { label: 'Indeks FWI BMKG (0-50+)', min: 0, max: 50 },
+  ph: { label: 'pH Tanah (0-14)', min: 3, max: 10 },
+  flow_rate: { label: 'Debit Air (L/min)', min: 0, max: 10 },
+  total_water: { label: 'Volume Air (Liter)', min: 0, max: 50 },
 };
 
 export function SensorChart({ data, type, title, color }: SensorChartProps) {

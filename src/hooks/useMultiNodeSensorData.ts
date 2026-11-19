@@ -7,6 +7,11 @@ export interface NodeSensorData {
   humidity: number | null;
   soil_moisture: number | null;
   soil_temp?: number | null;
+  ph?: number | null;
+  flow_rate?: number | null;
+  total_water?: number | null;
+  session_water?: number | null;
+  valve_status?: string | null;
   fwi?: number | null;
   fwi_level?: number | null;
   fwi_status?: string | null;
@@ -30,17 +35,23 @@ function toNumber(value: unknown): number | null {
 }
 
 function normalizeNodeData(row: Record<string, unknown>): NodeSensorData | null {
-  const nodeId = toNumber(row.node_id ?? String(row.device_id ?? '').replace('node_', ''));
-  if (nodeId !== 1 && nodeId !== 2 && nodeId !== 3) return null;
+  const rawId = row.node_id ?? String(row.device_id ?? '').replace('node_', '');
+  const nodeId = rawId === 0 || rawId === '0' || row.device_id === 'ESP32_Gateway' ? 0 : toNumber(rawId);
+  if (nodeId !== 0 && nodeId !== 1 && nodeId !== 2 && nodeId !== 3) return null;
 
   const temp = toNumber(row.temperature);
   const hum = toNumber(row.humidity);
   const soil = toNumber(row.soil_moisture ?? row.soil);
   const soilTemp = toNumber(row.soil_temp ?? row.battery);
   const fwi = toNumber(row.fwi ?? row.fwi_score);
+  const ph = toNumber(row.ph);
+  const flowRate = toNumber(row.flow_rate);
+  const totalWater = toNumber(row.total_water ?? row.total_liters);
+  const sessionWater = toNumber(row.session_water ?? row.session_liters);
+  const valveStatus = typeof row.valve_status === 'string' ? row.valve_status : (typeof row.active_valve === 'string' ? row.active_valve : null);
 
   // Jika semua nilai kosong/null, abaikan agar tidak menimpa data yang aktif
-  if (temp === null && hum === null && soil === null && soilTemp === null && fwi === null) {
+  if (temp === null && hum === null && soil === null && soilTemp === null && fwi === null && ph === null && flowRate === null && totalWater === null) {
     return null;
   }
 
@@ -50,6 +61,11 @@ function normalizeNodeData(row: Record<string, unknown>): NodeSensorData | null 
     humidity: hum,
     soil_moisture: soil,
     soil_temp: soilTemp,
+    ph,
+    flow_rate: flowRate,
+    total_water: totalWater,
+    session_water: sessionWater,
+    valve_status: valveStatus,
     fwi: fwi,
     fwi_level: toNumber(row.fwi_level),
     fwi_status: typeof row.fwi_status === 'string' ? row.fwi_status : null,
@@ -63,7 +79,7 @@ function normalizeNodeData(row: Record<string, unknown>): NodeSensorData | null 
 }
 
 function snapshotToNodeData(snap: MqttSensorSnapshot): NodeSensorData | null {
-  if (snap.node_id !== 1 && snap.node_id !== 2 && snap.node_id !== 3) return null;
+  if (snap.node_id !== 0 && snap.node_id !== 1 && snap.node_id !== 2 && snap.node_id !== 3) return null;
 
   return {
     node_id: snap.node_id,
@@ -71,6 +87,11 @@ function snapshotToNodeData(snap: MqttSensorSnapshot): NodeSensorData | null {
     humidity: snap.humidity,
     soil_moisture: snap.soil_moisture,
     soil_temp: snap.soil_temp ?? null,
+    ph: snap.ph ?? null,
+    flow_rate: snap.flow_rate ?? null,
+    total_water: snap.total_water ?? null,
+    session_water: snap.session_water ?? null,
+    valve_status: snap.valve_status ?? null,
     fwi: snap.fwi ?? null,
     fwi_level: snap.fwi_level ?? null,
     fwi_status: snap.fwi_status ?? null,
@@ -93,6 +114,11 @@ function isSameValues(a: NodeSensorData | null, b: NodeSensorData | null): boole
     a.humidity === b.humidity &&
     a.soil_moisture === b.soil_moisture &&
     a.soil_temp === b.soil_temp &&
+    a.ph === b.ph &&
+    a.flow_rate === b.flow_rate &&
+    a.total_water === b.total_water &&
+    a.session_water === b.session_water &&
+    a.valve_status === b.valve_status &&
     a.fwi === b.fwi &&
     a.fwi_level === b.fwi_level
   );
@@ -111,16 +137,19 @@ function loadInitialNode(nodeId: number): NodeSensorData | null {
 }
 
 export function useMultiNodeSensorData() {
+  const initial0 = loadInitialNode(0);
   const initial1 = loadInitialNode(1);
   const initial2 = loadInitialNode(2);
   const initial3 = loadInitialNode(3);
 
+  const [gateway, setGateway] = useState<NodeSensorData | null>(initial0);
   const [node1, setNode1] = useState<NodeSensorData | null>(initial1);
   const [node2, setNode2] = useState<NodeSensorData | null>(initial2);
   const [node3, setNode3] = useState<NodeSensorData | null>(initial3);
   const [loading, setLoading] = useState(true);
 
   // Ref untuk perbandingan cepat tanpa re-render
+  const gatewayRef = useRef<NodeSensorData | null>(initial0);
   const node1Ref = useRef<NodeSensorData | null>(initial1);
   const node2Ref = useRef<NodeSensorData | null>(initial2);
   const node3Ref = useRef<NodeSensorData | null>(initial3);
@@ -128,7 +157,21 @@ export function useMultiNodeSensorData() {
   const applyNodeData = useCallback((next: NodeSensorData) => {
     if (!next) return;
 
-    if (next.node_id === 1) {
+    if (next.node_id === 0) {
+      const prev = gatewayRef.current;
+      const merged: NodeSensorData = {
+        ...next,
+        ph: next.ph ?? prev?.ph ?? null,
+        flow_rate: next.flow_rate ?? prev?.flow_rate ?? null,
+        total_water: next.total_water ?? prev?.total_water ?? null,
+        session_water: next.session_water ?? prev?.session_water ?? null,
+        valve_status: next.valve_status ?? prev?.valve_status ?? null,
+      };
+      if (isSameValues(prev, merged)) return;
+      gatewayRef.current = merged;
+      setGateway(merged);
+      try { localStorage.setItem('teranova_node_0', JSON.stringify(merged)); } catch {}
+    } else if (next.node_id === 1) {
       const prev = node1Ref.current;
       const merged: NodeSensorData = {
         ...next,
@@ -202,13 +245,18 @@ export function useMultiNodeSensorData() {
     };
   }, [applyNodeData]);
 
-  // 2. Real-time MQTT — baca per-node snapshot (termasuk Node 3)
+  // 2. Real-time MQTT — baca per-node snapshot (termasuk Gateway Node 0 dan Node 3)
   useEffect(() => {
     const unsubscribe = subscribeMqttStatus(() => {
+      const snap0 = getNodeSensorSnapshot(0);
       const snap1 = getNodeSensorSnapshot(1);
       const snap2 = getNodeSensorSnapshot(2);
       const snap3 = getNodeSensorSnapshot(3);
 
+      if (snap0) {
+        const data = snapshotToNodeData(snap0);
+        if (data) applyNodeData(data);
+      }
       if (snap1) {
         const data = snapshotToNodeData(snap1);
         if (data) applyNodeData(data);
@@ -255,5 +303,5 @@ export function useMultiNodeSensorData() {
     };
   })() : null;
 
-  return { node1, node2, node3: node3WithDerivedValues, loading, isNode3Active };
+  return { node1, node2, node3: node3WithDerivedValues, gateway, loading, isNode3Active };
 }

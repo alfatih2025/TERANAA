@@ -73,11 +73,11 @@ export default async function handler(req, res) {
           row.soil_temp != null || row.temperature != null || row.humidity != null || row.score != null
         );
       } else {
-        // Node 1 & 2 (Hortikultura): online jika temp/hum/soil > 0 (bukan 0.0 dari sensor mati)
+        // Node 1 & 2 (Hortikultura): online jika ada data sensor (0 = valid, hanya null = tidak ada)
         hasRealData = Boolean(
-          (row.temperature != null && row.temperature > 0) ||
-          (row.humidity != null && row.humidity > 0) ||
-          (row.soil_moisture != null && row.soil_moisture > 0)
+          row.temperature != null ||
+          row.humidity != null ||
+          row.soil_moisture != null
         );
       }
 

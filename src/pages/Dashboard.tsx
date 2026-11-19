@@ -38,23 +38,19 @@ export function Dashboard({ sensorData, settings, weatherData }: DashboardProps)
     });
   };
 
-  // Node 1 & 2 (Hortikultura): Online hanya jika ada data RIIL (bukan 0.0 dari sensor mati)
+  // Node 1 & 2 (Hortikultura): Online jika ada data sensor (0 = valid, hanya null = tidak ada)
   // DAN data diterima dalam 15 menit terakhir
   const isNode1Online = Boolean(
     node1 &&
       node1.created_at &&
       new Date().getTime() - new Date(node1.created_at).getTime() < 15 * 60 * 1000 &&
-      ((node1.temperature !== null && node1.temperature > 0) ||
-       (node1.humidity !== null && node1.humidity > 0) ||
-       (node1.soil_moisture !== null && node1.soil_moisture > 0))
+      (node1.temperature !== null || node1.humidity !== null || node1.soil_moisture !== null)
   );
   const isNode2Online = Boolean(
     node2 &&
       node2.created_at &&
       new Date().getTime() - new Date(node2.created_at).getTime() < 15 * 60 * 1000 &&
-      ((node2.temperature !== null && node2.temperature > 0) ||
-       (node2.humidity !== null && node2.humidity > 0) ||
-       (node2.soil_moisture !== null && node2.soil_moisture > 0))
+      (node2.temperature !== null || node2.humidity !== null || node2.soil_moisture !== null)
   );
   // Node 3 (Gambut/Karhutla): Online jika ada data sensor (soil_temp, temp, hum, fwi)
   // DAN data diterima dalam 15 menit terakhir

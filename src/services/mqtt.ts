@@ -872,6 +872,7 @@ function updateFromTopic(topic: string, payload: string) {
       });
     }
     return;
+  }
 
   if (topic === TOPIC_LAMPU_MODE_STATUS) {
     const isLampOn = parseBoolean(trimmed);

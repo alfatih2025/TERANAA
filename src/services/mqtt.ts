@@ -16,6 +16,8 @@ const TOPIC_POMPA_CMD = 'sproutai/pompa/cmd';
 const TOPIC_POMPA_STATUS = 'sproutai/pompa/status';
 const TOPIC_LAMPU_CMD = 'sproutai/lampu/cmd';
 const TOPIC_LAMPU_STATUS = 'sproutai/lampu/status';
+const TOPIC_LAMPU_MODE_STATUS = 'sproutai/lampu/mode/status';
+const TOPIC_LAMPU_ONLINE_STATUS = 'sproutai/lampu/online/status';
 const TOPIC_MODE_CMD = 'sproutai/mode/cmd';
 const TOPIC_MODE_STATUS = 'sproutai/mode/status';
 const TOPIC_WIFI_CMD = 'sproutai/wifi/cmd';
@@ -54,6 +56,8 @@ const SUBSCRIBE_TOPICS = [
   TOPIC_SCORE,
   TOPIC_POMPA_STATUS,
   TOPIC_LAMPU_STATUS,
+  TOPIC_LAMPU_MODE_STATUS,
+  TOPIC_LAMPU_ONLINE_STATUS,
   TOPIC_MODE_STATUS,
   TOPIC_WIFI_STATUS,
   TOPIC_SETTINGS_CMD,
@@ -119,6 +123,8 @@ export interface MqttActuatorSnapshot {
   currentLiters?: number | null;
   totalLiters?: number | null;
   targetLiters?: number | null;
+  lampuMode?: boolean | null;
+  lampuOnline?: boolean | null;
   updatedAt: string | null;
   sourceTopic: string | null;
 }
@@ -628,6 +634,8 @@ function parseActuatorStatusPayload(payload: string): Partial<Omit<MqttActuatorS
   const currentLiters = parseNumeric(parsed.current_liters ?? parsed.session_liters ?? parsed.session_water);
   const totalLiters = parseNumeric(parsed.total_liters ?? parsed.total_water);
   const targetLiters = parseNumeric(parsed.target_liters ?? parsed.target_water);
+  const lampuMode = parseBoolean(parsed.lampu_mode);
+  const lampuOnline = parseBoolean(parsed.lampu_online);
 
   if (
     irigasi === undefined &&
@@ -638,7 +646,9 @@ function parseActuatorStatusPayload(payload: string): Partial<Omit<MqttActuatorS
     ph === null &&
     flowRate === null &&
     currentLiters === null &&
-    totalLiters === null
+    totalLiters === null &&
+    lampuMode === undefined &&
+    lampuOnline === undefined
   ) {
     return null;
   }
@@ -654,6 +664,8 @@ function parseActuatorStatusPayload(payload: string): Partial<Omit<MqttActuatorS
     currentLiters: currentLiters ?? undefined,
     totalLiters: totalLiters ?? undefined,
     targetLiters: targetLiters ?? undefined,
+    lampuMode,
+    lampuOnline,
   };
 }
 
@@ -672,6 +684,8 @@ function setActuatorSnapshot(
     currentLiters: null,
     totalLiters: null,
     targetLiters: null,
+    lampuMode: null,
+    lampuOnline: null,
     updatedAt: null,
     sourceTopic: null,
   };
@@ -688,6 +702,8 @@ function setActuatorSnapshot(
     currentLiters: next.currentLiters !== undefined ? next.currentLiters : previous.currentLiters,
     totalLiters: next.totalLiters !== undefined ? next.totalLiters : previous.totalLiters,
     targetLiters: next.targetLiters !== undefined ? next.targetLiters : previous.targetLiters,
+    lampuMode: next.lampuMode !== undefined ? next.lampuMode : (next.mode ? next.mode === 'auto' : previous.lampuMode),
+    lampuOnline: next.lampuOnline !== undefined ? next.lampuOnline : previous.lampuOnline,
     updatedAt: new Date().toISOString(),
     sourceTopic,
   };
@@ -856,6 +872,15 @@ function updateFromTopic(topic: string, payload: string) {
       });
     }
     return;
+
+  if (topic === TOPIC_LAMPU_MODE_STATUS) {
+    const isLampOn = parseBoolean(trimmed);
+    if (isLampOn !== undefined) setActuatorSnapshot({ lampuMode: isLampOn }, topic);
+  }
+
+  if (topic === TOPIC_LAMPU_ONLINE_STATUS) {
+    const isLampOn = parseBoolean(trimmed);
+    if (isLampOn !== undefined) setActuatorSnapshot({ lampuOnline: isLampOn }, topic);
   }
 
   if (

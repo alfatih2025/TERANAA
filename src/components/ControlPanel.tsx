@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Bot, CirclePower, Droplets, FlaskConical, Hand, Radio } from 'lucide-react';
+import { Bot, CirclePower, Droplets, FlaskConical, Hand, Radio, Lightbulb, Wifi, WifiOff } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useControl } from '../hooks/useControl';
 import { useMqttStatus } from '../hooks/useMqttStatus';
@@ -147,6 +147,9 @@ export function ControlPanel() {
   const manualMode = mode === 'manual';
   // Hanya kunci kontrol manual jika sistem secara aktif berada di mode Otomatis
   const controlsLocked = mode === 'auto';
+  const isModeAuto = mode === 'auto';
+  const lampModeActive = actuatorSnapshot?.lampuMode ?? isModeAuto;
+  const lampOnlineActive = actuatorSnapshot?.lampuOnline ?? espOnline;
 
   const runCommand = async (
     target: CommandTarget,
@@ -261,6 +264,71 @@ export function ControlPanel() {
 
       {/* Monitoring Real-time pH & Aliran Air Irigasi Gateway */}
       <GatewayCard data={gateway} actuatorSnapshot={actuatorSnapshot} isOnline={espOnline} />
+
+      {/* Indikator Lampu Relay Fisik (Mode D26 & Online D25) */}
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900" aria-labelledby="indicator-lamps-title">
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-3">
+            <div className="rounded-2xl bg-amber-100 p-2.5 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">
+              <Lightbulb aria-hidden="true" size={22} />
+            </div>
+            <div>
+              <h3 id="indicator-lamps-title" className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+                Lampu Indikator Relay Gateway
+              </h3>
+              <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-400">
+                Status relay indikator fisik perangkat ESP32 Gateway (Pin D26 &amp; D25)
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          {/* Lampu Mode - Pin D26 */}
+          <div className="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-slate-50/70 p-4 transition-colors dark:border-slate-800 dark:bg-slate-800/40">
+            <div className="flex items-center gap-3.5">
+              <div className={`rounded-xl p-2.5 transition-colors ${lampModeActive ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400 shadow-sm shadow-emerald-500/20' : 'bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-400'}`}>
+                <Lightbulb size={22} className={lampModeActive ? 'animate-pulse' : ''} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h4 className="font-semibold text-slate-900 dark:text-slate-100 text-sm">Lampu Mode</h4>
+                  <span className="rounded bg-slate-200/90 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-300">PIN D26</span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  {lampModeActive ? 'Otomatis Aktif (Lampu ON)' : 'Manual Aktif (Lampu OFF)'}
+                </p>
+              </div>
+            </div>
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold ${lampModeActive ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300' : 'bg-slate-200/80 text-slate-600 dark:bg-slate-700/60 dark:text-slate-400'}`}>
+              <span className={`h-2 w-2 rounded-full ${lampModeActive ? 'bg-emerald-500 animate-ping' : 'bg-slate-400'}`} />
+              {lampModeActive ? 'ON' : 'OFF'}
+            </span>
+          </div>
+
+          {/* Lampu Online - Pin D25 */}
+          <div className="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-slate-50/70 p-4 transition-colors dark:border-slate-800 dark:bg-slate-800/40">
+            <div className="flex items-center gap-3.5">
+              <div className={`rounded-xl p-2.5 transition-colors ${lampOnlineActive ? 'bg-sky-100 text-sky-600 dark:bg-sky-500/20 dark:text-sky-400 shadow-sm shadow-sky-500/20' : 'bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-400'}`}>
+                {lampOnlineActive ? <Wifi size={22} className="animate-pulse" /> : <WifiOff size={22} />}
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h4 className="font-semibold text-slate-900 dark:text-slate-100 text-sm">Lampu WiFi Online</h4>
+                  <span className="rounded bg-slate-200/90 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-300">PIN D25</span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  {lampOnlineActive ? 'WiFi Terhubung (Lampu ON)' : 'WiFi Terputus (Lampu OFF)'}
+                </p>
+              </div>
+            </div>
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold ${lampOnlineActive ? 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300' : 'bg-slate-200/80 text-slate-600 dark:bg-slate-700/60 dark:text-slate-400'}`}>
+              <span className={`h-2 w-2 rounded-full ${lampOnlineActive ? 'bg-sky-500 animate-ping' : 'bg-slate-400'}`} />
+              {lampOnlineActive ? 'ON' : 'OFF'}
+            </span>
+          </div>
+        </div>
+      </section>
 
       <div className="grid gap-6 xl:grid-cols-2">
         <ActuatorCard

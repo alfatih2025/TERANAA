@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Bot, CirclePower, Droplets, FlaskConical, Hand, Radio, Lightbulb, Wifi, WifiOff } from 'lucide-react';
+import { Bot, CalendarClock, CirclePower, Droplets, FlaskConical, Hand, Radio, Lightbulb, RotateCw, Wifi, WifiOff } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useControl } from '../hooks/useControl';
 import { useMqttStatus } from '../hooks/useMqttStatus';
 import { useMultiNodeSensorData } from '../hooks/useMultiNodeSensorData';
 import { GatewayCard } from './GatewayCard';
+import { syncBrowserTimeToEsp32 } from '../services/mqtt';
 
 type Feedback = { tone: 'success' | 'error'; message: string } | null;
 type ActuatorKey = 'irrigation' | 'fertigation';
@@ -129,9 +130,12 @@ function ActuatorCard({
 
 export function ControlPanel() {
   const { sendCommand } = useControl();
-  const { actuatorSnapshot, espOnline } = useMqttStatus();
+  const { actuatorSnapshot, espOnline, scheduleSnapshot } = useMqttStatus();
   const { gateway } = useMultiNodeSensorData();
   const [modeFeedback, setModeFeedback] = useState<Feedback>(null);
+  const [scheduleFeedback, setScheduleFeedback] = useState<Feedback>(null);
+  const [isUpdatingSchedule, setIsUpdatingSchedule] = useState(false);
+  const [isSyncingTime, setIsSyncingTime] = useState(false);
   const [actuatorFeedback, setActuatorFeedback] = useState<Record<ActuatorKey, Feedback>>({
     irrigation: null,
     fertigation: null,
@@ -149,6 +153,58 @@ export function ControlPanel() {
   const controlsLocked = mode === 'auto';
   const lampSystemActive = actuatorSnapshot?.lampuSystem ?? espOnline ?? true;
   const lampOnlineActive = actuatorSnapshot?.lampuOnline ?? espOnline;
+
+  const schedule = scheduleSnapshot ?? {
+    schedule_enabled: true,
+    watering_time: '06:00',
+    watering_duration: 10,
+    time_valid: false,
+    current_time: '--:--',
+    last_watered: 'Belum ada',
+    updatedAt: null,
+    sourceTopic: null,
+  };
+
+  const handleToggleSchedule = async () => {
+    setIsUpdatingSchedule(true);
+    setScheduleFeedback(null);
+    const nextEnabled = !schedule.schedule_enabled;
+    try {
+      const res = await sendCommand('schedule_set', undefined, {
+        schedule_enabled: nextEnabled,
+        watering_enabled: nextEnabled,
+        watering_time: schedule.watering_time || '06:00',
+        watering_duration: schedule.watering_duration || 10,
+      });
+      if (res.success) {
+        setScheduleFeedback({
+          tone: 'success',
+          message: nextEnabled ? 'Jadwal penyiraman otomatis berhasil diaktifkan!' : 'Jadwal penyiraman otomatis dinonaktifkan.',
+        });
+      } else {
+        setScheduleFeedback({ tone: 'error', message: res.error || 'Gagal mengubah status jadwal.' });
+      }
+    } catch {
+      setScheduleFeedback({ tone: 'error', message: 'Gagal mengirim perintah ke ESP32.' });
+    } finally {
+      setIsUpdatingSchedule(false);
+    }
+  };
+
+  const handleSyncTime = async () => {
+    setIsSyncingTime(true);
+    try {
+      await syncBrowserTimeToEsp32();
+      setScheduleFeedback({
+        tone: 'success',
+        message: 'Jam RTC ESP32 Gateway berhasil disinkronkan dengan waktu perangkat ini!',
+      });
+    } catch {
+      setScheduleFeedback({ tone: 'error', message: 'Gagal mengirim sinkronisasi waktu.' });
+    } finally {
+      setIsSyncingTime(false);
+    }
+  };
 
   const runCommand = async (
     target: CommandTarget,
@@ -327,6 +383,103 @@ export function ControlPanel() {
             </span>
           </div>
         </div>
+      </section>
+
+      {/* Jadwal Penyiraman Otomatis Gateway */}
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900" aria-labelledby="schedule-card-title">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className={`rounded-2xl p-3 ${schedule?.schedule_enabled ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'}`}>
+              <CalendarClock aria-hidden="true" size={24} />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Automasi Waktu</p>
+              <h3 id="schedule-card-title" className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+                Jadwal Penyiraman Gateway
+              </h3>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+                {schedule?.schedule_enabled
+                  ? `Gateway akan menyiram otomatis setiap hari pukul ${schedule.watering_time || '06:00'} WIB selama ${schedule.watering_duration || 10} detik.`
+                  : 'Jadwal penyiraman otomatis saat ini dinonaktifkan.'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${schedule?.schedule_enabled ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-500/20 dark:text-indigo-200' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
+              <span className={`h-2 w-2 rounded-full ${schedule?.schedule_enabled ? 'bg-indigo-500 animate-pulse' : 'bg-slate-400'}`} />
+              {schedule?.schedule_enabled ? 'Jadwal Aktif' : 'Nonaktif'}
+            </span>
+          </div>
+        </div>
+
+        <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="rounded-2xl border border-slate-200/80 bg-slate-50/70 p-3.5 dark:border-slate-800 dark:bg-slate-800/40">
+            <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">Waktu Siram</p>
+            <p className="mt-1 text-base font-bold text-slate-900 dark:text-slate-100 font-mono">
+              {schedule?.watering_time || '06:00'} <span className="text-xs font-sans font-normal text-slate-500">WIB</span>
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200/80 bg-slate-50/70 p-3.5 dark:border-slate-800 dark:bg-slate-800/40">
+            <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">Durasi Siram</p>
+            <p className="mt-1 text-base font-bold text-slate-900 dark:text-slate-100 font-mono">
+              {schedule?.watering_duration || 10} <span className="text-xs font-sans font-normal text-slate-500">detik</span>
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200/80 bg-slate-50/70 p-3.5 dark:border-slate-800 dark:bg-slate-800/40">
+            <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">Jam Gateway</p>
+            <p className="mt-1 text-base font-bold text-slate-900 dark:text-slate-100 font-mono">
+              {schedule?.current_time && schedule.current_time !== '--:--' ? schedule.current_time : '--:--:--'}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200/80 bg-slate-50/70 p-3.5 dark:border-slate-800 dark:bg-slate-800/40">
+            <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">Terakhir Siram</p>
+            <p className="mt-1 text-base font-bold text-slate-900 dark:text-slate-100 font-mono">
+              {schedule?.last_watered || 'Belum ada'}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-slate-800">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleToggleSchedule}
+              disabled={isUpdatingSchedule || !espOnline}
+              className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-semibold transition-colors disabled:opacity-50 ${schedule?.schedule_enabled ? 'border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
+            >
+              <CalendarClock size={15} />
+              {schedule?.schedule_enabled ? 'Nonaktifkan Jadwal' : 'Aktifkan Jadwal'}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSyncTime}
+              disabled={!espOnline}
+              title="Sinkronkan jam internal ESP32 dengan jam perangkat ini"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
+            >
+              <RotateCw size={14} className={isSyncingTime ? 'animate-spin' : ''} />
+              Sinkron Jam
+            </button>
+          </div>
+
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Ubah jam &amp; durasi di halaman <a href="/settings" className="font-semibold text-indigo-600 hover:underline dark:text-indigo-400">Pengaturan</a>
+          </p>
+        </div>
+
+        {scheduleFeedback && (
+          <p
+            className={`mt-4 rounded-xl border px-4 py-3 text-sm font-medium ${scheduleFeedback.tone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-400/50 dark:bg-emerald-950/80 dark:text-emerald-50' : 'border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-400/50 dark:bg-rose-950/80 dark:text-rose-50'}`}
+            role={scheduleFeedback.tone === 'error' ? 'alert' : 'status'}
+          >
+            {scheduleFeedback.message}
+          </p>
+        )}
       </section>
 
       <div className="grid gap-6 xl:grid-cols-2">

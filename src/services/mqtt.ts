@@ -132,6 +132,17 @@ export interface MqttActuatorSnapshot {
   sourceTopic: string | null;
 }
 
+export interface MqttScheduleSnapshot {
+  schedule_enabled: boolean;
+  watering_time: string;
+  watering_duration: number;
+  time_valid: boolean;
+  current_time: string;
+  last_watered: string;
+  updatedAt: string | null;
+  sourceTopic: string | null;
+}
+
 export interface MqttStatusSnapshot {
   brokerUrl: string;
   browserOnline: boolean;
@@ -151,6 +162,7 @@ export interface MqttStatusSnapshot {
   subscribedTopics: string[];
   sensorSnapshot: MqttSensorSnapshot | null;
   actuatorSnapshot: MqttActuatorSnapshot | null;
+  scheduleSnapshot?: MqttScheduleSnapshot | null;
 }
 
 type SensorDelta = Partial<Omit<MqttSensorSnapshot, 'updatedAt' | 'sourceTopic'>>;
@@ -213,6 +225,27 @@ function getInitialSavedActuator(): MqttActuatorSnapshot {
   return fallback;
 }
 
+function getInitialSavedSchedule(): MqttScheduleSnapshot {
+  const fallback: MqttScheduleSnapshot = {
+    schedule_enabled: true,
+    watering_time: '06:00',
+    watering_duration: 10,
+    time_valid: false,
+    current_time: '--:--',
+    last_watered: 'Belum ada',
+    updatedAt: null,
+    sourceTopic: null,
+  };
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const saved = localStorage.getItem('teranova_gateway_schedule');
+    if (saved) {
+      return { ...fallback, ...JSON.parse(saved) };
+    }
+  } catch {}
+  return fallback;
+}
+
 const defaultSnapshot = (): MqttStatusSnapshot => ({
   brokerUrl: BROKER_URL,
   browserOnline: typeof navigator === 'undefined' ? true : navigator.onLine,
@@ -232,11 +265,13 @@ const defaultSnapshot = (): MqttStatusSnapshot => ({
   subscribedTopics: SUBSCRIBE_TOPICS,
   sensorSnapshot: null,
   actuatorSnapshot: getInitialSavedActuator(),
+  scheduleSnapshot: getInitialSavedSchedule(),
 });
 
 let snapshot: MqttStatusSnapshot = defaultSnapshot();
 let sensorSnapshot: MqttSensorSnapshot | null = null;
 let actuatorSnapshot: MqttActuatorSnapshot | null = getInitialSavedActuator();
+let scheduleSnapshot: MqttScheduleSnapshot = getInitialSavedSchedule();
 let sensorSnapshotByNode: Map<number, MqttSensorSnapshot> = new Map();
 let sensorHistory: MqttSensorSnapshot[] = [];
 let reconnectTimer: number | null = null;
@@ -730,6 +765,34 @@ function setActuatorSnapshot(
   setSnapshot({ actuatorSnapshot });
 }
 
+function setScheduleSnapshot(
+  next: Partial<Omit<MqttScheduleSnapshot, 'updatedAt' | 'sourceTopic'>>,
+  sourceTopic: string,
+) {
+  const previous = scheduleSnapshot;
+  scheduleSnapshot = {
+    ...previous,
+    schedule_enabled: next.schedule_enabled !== undefined ? next.schedule_enabled : previous.schedule_enabled,
+    watering_time: next.watering_time !== undefined ? next.watering_time : previous.watering_time,
+    watering_duration: next.watering_duration !== undefined ? next.watering_duration : previous.watering_duration,
+    time_valid: next.time_valid !== undefined ? next.time_valid : previous.time_valid,
+    current_time: next.current_time !== undefined ? next.current_time : previous.current_time,
+    last_watered: next.last_watered !== undefined ? next.last_watered : previous.last_watered,
+    updatedAt: new Date().toISOString(),
+    sourceTopic,
+  };
+
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('teranova_gateway_schedule', JSON.stringify(scheduleSnapshot));
+    } catch {
+      // ignore
+    }
+  }
+
+  setSnapshot({ scheduleSnapshot });
+}
+
 function normalizeJsonSensorPayload(payload: string): SensorDelta | null {
   try {
     const obj = JSON.parse(payload);
@@ -921,6 +984,31 @@ function updateFromTopic(topic: string, payload: string) {
     }
   }
 
+  if (topic === TOPIC_SCHEDULE_STATUS || topic === TOPIC_SCHEDULE_CMD) {
+    const parsed = parseMqttJsonPayload(trimmed);
+    if (parsed) {
+      const schedEn = parseBoolean(parsed.schedule_enabled ?? parsed.watering_enabled ?? parsed.se);
+      const wt = typeof parsed.watering_time === 'string'
+        ? parsed.watering_time.trim()
+        : (typeof parsed.wt === 'string' ? parsed.wt.trim() : undefined);
+      const wd = parseNumeric(parsed.watering_duration ?? parsed.wd);
+      const tv = parseBoolean(parsed.time_valid);
+      const ct = typeof parsed.current_time === 'string' ? parsed.current_time : undefined;
+      const lw = typeof parsed.last_watered === 'string'
+        ? parsed.last_watered
+        : (typeof parsed.last_watered_time === 'string' ? parsed.last_watered_time : undefined);
+
+      setScheduleSnapshot({
+        schedule_enabled: schedEn ?? undefined,
+        watering_time: wt ?? undefined,
+        watering_duration: wd ?? undefined,
+        time_valid: tv ?? undefined,
+        current_time: ct ?? undefined,
+        last_watered: lw ?? undefined,
+      }, topic);
+    }
+  }
+
   if (
     topic.startsWith('sproutai/sensor/') ||
     topic.startsWith('sproutai/pompa/') ||
@@ -982,6 +1070,13 @@ async function connectOnce() {
     announceWebPresence('online').catch((error: unknown) => {
       console.error('[MQTT] gagal mengirim status web:', error);
     });
+
+    // Otomatis sinkronkan waktu browser ke ESP32 agar RTC tepat dan sinkron
+    try {
+      const epoch = Math.floor(Date.now() / 1000);
+      client?.publish('sproutai/time/cmd', JSON.stringify({ epoch }), { qos: 0 });
+    } catch {}
+
     setSnapshot({ webPublishedAt: new Date().toISOString() });
   });
 
@@ -1079,6 +1174,19 @@ export function getSensorSnapshot() {
 
 export function getNodeSensorSnapshot(nodeId: number): MqttSensorSnapshot | null {
   return sensorSnapshotByNode.get(nodeId) ?? null;
+}
+
+export function getScheduleSnapshot(): MqttScheduleSnapshot {
+  return scheduleSnapshot;
+}
+
+export async function syncBrowserTimeToEsp32(): Promise<void> {
+  try {
+    const epoch = Math.floor(Date.now() / 1000);
+    await publishMqtt('sproutai/time/cmd', JSON.stringify({ epoch }), { qos: 0 });
+  } catch (e) {
+    console.warn('[MQTT] Gagal mengirim sinkronisasi waktu browser:', e);
+  }
 }
 
 export function getSensorHistorySnapshot() {

@@ -147,8 +147,7 @@ export function ControlPanel() {
   const manualMode = mode === 'manual';
   // Hanya kunci kontrol manual jika sistem secara aktif berada di mode Otomatis
   const controlsLocked = mode === 'auto';
-  const isModeAuto = mode === 'auto';
-  const lampModeActive = actuatorSnapshot?.lampuMode ?? isModeAuto;
+  const lampSystemActive = actuatorSnapshot?.lampuSystem ?? espOnline ?? true;
   const lampOnlineActive = actuatorSnapshot?.lampuOnline ?? espOnline;
 
   const runCommand = async (
@@ -284,25 +283,25 @@ export function ControlPanel() {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          {/* Lampu Mode - Pin D26 */}
+          {/* Lampu Daya / Sistem - Pin D26 */}
           <div className="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-slate-50/70 p-4 transition-colors dark:border-slate-800 dark:bg-slate-800/40">
             <div className="flex items-center gap-3.5">
-              <div className={`rounded-xl p-2.5 transition-colors ${lampModeActive ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400 shadow-sm shadow-emerald-500/20' : 'bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-400'}`}>
-                <Lightbulb size={22} className={lampModeActive ? 'animate-pulse' : ''} />
+              <div className={`rounded-xl p-2.5 transition-colors ${lampSystemActive ? 'bg-amber-100 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400 shadow-sm shadow-amber-500/20' : 'bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-400'}`}>
+                <CirclePower size={22} className={lampSystemActive ? 'animate-pulse' : ''} />
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h4 className="font-semibold text-slate-900 dark:text-slate-100 text-sm">Lampu Mode</h4>
+                  <h4 className="font-semibold text-slate-900 dark:text-slate-100 text-sm">Lampu Daya / Sistem</h4>
                   <span className="rounded bg-slate-200/90 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-300">PIN D26</span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  {lampModeActive ? 'Otomatis Aktif (Lampu ON)' : 'Manual Aktif (Lampu OFF)'}
+                  {lampSystemActive ? 'ESP32 Menyala & Aktif (Lampu ON)' : 'ESP32 Mati (Lampu OFF)'}
                 </p>
               </div>
             </div>
-            <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold ${lampModeActive ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300' : 'bg-slate-200/80 text-slate-600 dark:bg-slate-700/60 dark:text-slate-400'}`}>
-              <span className={`h-2 w-2 rounded-full ${lampModeActive ? 'bg-emerald-500 animate-ping' : 'bg-slate-400'}`} />
-              {lampModeActive ? 'ON' : 'OFF'}
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold ${lampSystemActive ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300' : 'bg-slate-200/80 text-slate-600 dark:bg-slate-700/60 dark:text-slate-400'}`}>
+              <span className={`h-2 w-2 rounded-full ${lampSystemActive ? 'bg-amber-500 animate-ping' : 'bg-slate-400'}`} />
+              {lampSystemActive ? 'ON' : 'OFF'}
             </span>
           </div>
 

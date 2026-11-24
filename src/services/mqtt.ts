@@ -16,6 +16,7 @@ const TOPIC_POMPA_CMD = 'sproutai/pompa/cmd';
 const TOPIC_POMPA_STATUS = 'sproutai/pompa/status';
 const TOPIC_LAMPU_CMD = 'sproutai/lampu/cmd';
 const TOPIC_LAMPU_STATUS = 'sproutai/lampu/status';
+const TOPIC_LAMPU_SYSTEM_STATUS = 'sproutai/lampu/system/status';
 const TOPIC_LAMPU_MODE_STATUS = 'sproutai/lampu/mode/status';
 const TOPIC_LAMPU_ONLINE_STATUS = 'sproutai/lampu/online/status';
 const TOPIC_MODE_CMD = 'sproutai/mode/cmd';
@@ -56,6 +57,7 @@ const SUBSCRIBE_TOPICS = [
   TOPIC_SCORE,
   TOPIC_POMPA_STATUS,
   TOPIC_LAMPU_STATUS,
+  TOPIC_LAMPU_SYSTEM_STATUS,
   TOPIC_LAMPU_MODE_STATUS,
   TOPIC_LAMPU_ONLINE_STATUS,
   TOPIC_MODE_STATUS,
@@ -124,6 +126,7 @@ export interface MqttActuatorSnapshot {
   totalLiters?: number | null;
   targetLiters?: number | null;
   lampuMode?: boolean | null;
+  lampuSystem?: boolean | null;
   lampuOnline?: boolean | null;
   updatedAt: string | null;
   sourceTopic: string | null;
@@ -635,6 +638,7 @@ function parseActuatorStatusPayload(payload: string): Partial<Omit<MqttActuatorS
   const totalLiters = parseNumeric(parsed.total_liters ?? parsed.total_water);
   const targetLiters = parseNumeric(parsed.target_liters ?? parsed.target_water);
   const lampuMode = parseBoolean(parsed.lampu_mode);
+  const lampuSystem = parseBoolean(parsed.lampu_sistem ?? parsed.lampu_system ?? parsed.lampu_mode);
   const lampuOnline = parseBoolean(parsed.lampu_online);
 
   if (
@@ -648,6 +652,7 @@ function parseActuatorStatusPayload(payload: string): Partial<Omit<MqttActuatorS
     currentLiters === null &&
     totalLiters === null &&
     lampuMode === undefined &&
+    lampuSystem === undefined &&
     lampuOnline === undefined
   ) {
     return null;
@@ -665,6 +670,7 @@ function parseActuatorStatusPayload(payload: string): Partial<Omit<MqttActuatorS
     totalLiters: totalLiters ?? undefined,
     targetLiters: targetLiters ?? undefined,
     lampuMode,
+    lampuSystem,
     lampuOnline,
   };
 }
@@ -685,6 +691,7 @@ function setActuatorSnapshot(
     totalLiters: null,
     targetLiters: null,
     lampuMode: null,
+    lampuSystem: null,
     lampuOnline: null,
     updatedAt: null,
     sourceTopic: null,
@@ -703,6 +710,7 @@ function setActuatorSnapshot(
     totalLiters: next.totalLiters !== undefined ? next.totalLiters : previous.totalLiters,
     targetLiters: next.targetLiters !== undefined ? next.targetLiters : previous.targetLiters,
     lampuMode: next.lampuMode !== undefined ? next.lampuMode : (next.mode ? next.mode === 'auto' : previous.lampuMode),
+    lampuSystem: next.lampuSystem !== undefined ? next.lampuSystem : (next.lampuMode !== undefined ? next.lampuMode : previous.lampuSystem),
     lampuOnline: next.lampuOnline !== undefined ? next.lampuOnline : previous.lampuOnline,
     updatedAt: new Date().toISOString(),
     sourceTopic,
@@ -874,9 +882,9 @@ function updateFromTopic(topic: string, payload: string) {
     return;
   }
 
-  if (topic === TOPIC_LAMPU_MODE_STATUS) {
+  if (topic === TOPIC_LAMPU_SYSTEM_STATUS || topic === TOPIC_LAMPU_MODE_STATUS) {
     const isLampOn = parseBoolean(trimmed);
-    if (isLampOn !== undefined) setActuatorSnapshot({ lampuMode: isLampOn }, topic);
+    if (isLampOn !== undefined) setActuatorSnapshot({ lampuSystem: isLampOn, lampuMode: isLampOn }, topic);
   }
 
   if (topic === TOPIC_LAMPU_ONLINE_STATUS) {

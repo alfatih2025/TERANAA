@@ -176,7 +176,12 @@ export function Dashboard({ sensorData, settings, weatherData }: DashboardProps)
       {/* Monitoring Card Khusus Karhutla (Jika diaktifkan atau sensor Node 3 aktif) */}
       {karhutlaEnabled && (
         <div className="space-y-2 animate-fadeIn">
-          <KarhutlaCard data={node3} isOnline={isNode3Online} />
+          <KarhutlaCard
+            data={node3}
+            isOnline={isNode3Online}
+            weatherData={weatherData}
+            selectedLocationCode={settings?.location}
+          />
         </div>
       )}
 

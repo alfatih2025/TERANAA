@@ -1,11 +1,15 @@
 import { useState } from 'react';
-import { Flame, Thermometer, Droplets, AlertTriangle, ShieldCheck, Info, ChevronDown, ChevronUp, Wind } from 'lucide-react';
+import { Flame, Thermometer, Droplets, AlertTriangle, ShieldCheck, Info, ChevronDown, ChevronUp } from 'lucide-react';
 import type { NodeSensorData } from '../hooks/useMultiNodeSensorData';
 import { timeAgo } from '../lib/timeUtils';
+import type { WeatherData } from '../hooks/useWeather';
+import { calculateFwiComponents, selectLiveBmkgConditions } from '../lib/karhutlaFwi';
 
 interface KarhutlaCardProps {
   data: NodeSensorData | null;
   isOnline: boolean;
+  weatherData?: WeatherData | null;
+  selectedLocationCode?: string | null;
 }
 
 function formatOneDecimal(val: number | null | undefined): string {
@@ -13,142 +17,46 @@ function formatOneDecimal(val: number | null | undefined): string {
   return Number(val).toFixed(1);
 }
 
-/**
- * Kalkulasi komponen FWI (Fire Weather Index) menggunakan model Van Wagner 1987
- * yang diadopsi BMKG dalam sistem SPARTAN untuk lahan gambut Indonesia.
- * Input: temperature (°C), humidity (%), soil_moisture (%), soil_temp (°C)
- */
-function calculateFwiComponents(
-  temp: number | null,
-  rh: number | null,
-  soilMoisture: number | null,
-  soilTemp: number | null
-) {
-  // Nilai default jika sensor tidak tersedia
-  const T = temp ?? 28;       // suhu udara (°C)
-  const H = rh ?? 70;         // kelembapan relatif (%)
-  const SM = soilMoisture ?? 50; // kadar air tanah (%)
-  const ST = soilTemp ?? 28;  // suhu tanah (°C)
-
-  // ═══════════════════════════════════════════════════════════
-  // FFMC (Fine Fuel Moisture Code) — Kekeringan Serasah Halus
-  // Skala 0-101. Tinggi = kering = mudah terbakar.
-  // Rumus: berbasis kelembapan dan suhu udara.
-  // ═══════════════════════════════════════════════════════════
-  const mo = 147.2 * (101 - 85) / (59.5 + 85); // initial moisture (asumsi FFMC0=85)
-  const rf = 0; // asumsi tidak ada hujan (data hujan tidak tersedia)
-  let m = mo;
-  if (rf > 0.5) {
-    const mr = mo + 42.5 * rf * Math.exp(-100 / (251 - mo)) * (1 - Math.exp(-6.93 / rf));
-    m = Math.min(mr, 250);
-  }
-  const Ed = 0.942 * Math.pow(H, 0.679) + 11 * Math.exp((H - 100) / 10) + 0.18 * (21.1 - T) * (1 - Math.exp(-0.115 * H));
-  const Ew = 0.618 * Math.pow(H, 0.753) + 10 * Math.exp((H - 100) / 10) + 0.18 * (21.1 - T) * (1 - Math.exp(-0.115 * H));
-  let mf: number;
-  if (m > Ed) {
-    const ko = 0.424 * (1 - Math.pow(H / 100, 1.7)) + 0.0694 * Math.sqrt(0) * (1 - Math.pow(H / 100, 8));
-    const kd = ko * 0.581 * Math.exp(0.0365 * T);
-    mf = Ed + (m - Ed) * Math.pow(10, -kd);
-  } else if (m < Ew) {
-    const kl = 0.424 * (1 - Math.pow((100 - H) / 100, 1.7)) + 0.0694 * Math.sqrt(0) * (1 - Math.pow((100 - H) / 100, 8));
-    const kw = kl * 0.581 * Math.exp(0.0365 * T);
-    mf = Ew - (Ew - m) * Math.pow(10, -kw);
-  } else {
-    mf = m;
-  }
-  const ffmc = Math.max(0, Math.min(101, 59.5 * (250 - mf) / (147.2 + mf)));
-
-  // ═══════════════════════════════════════════════════════════
-  // DMC (Duff Moisture Code) — Kadar Air Lapisan Gambut Atas
-  // Skala 0-∞ (kritis >20). Tinggi = kering = kritis gambut.
-  // ═══════════════════════════════════════════════════════════
-  const Le = [6.4, 5.0, 3.0, 1.1, 0.4, 0.1, 0, 0.3, 0.9, 1.9, 3.5, 5.3][new Date().getMonth()];
-  const K = 1.894 * (T + 1.1) * (100 - H) * Le * 1e-6;
-  const DMC0 = 6; // initial DMC (nilai referensi)
-  // Koreksi DMC dengan soil_moisture: gambut lembap menurunkan DMC
-  const soilMoistureFactor = Math.max(0, Math.min(1, SM / 100));
-  const dmc = Math.max(0, (DMC0 + 100 * K) * (1 - soilMoistureFactor * 0.5));
-
-  // ═══════════════════════════════════════════════════════════
-  // DC (Drought Code) — Kekeringan Lapisan Dalam Gambut
-  // Skala 0-800+. Kritis jika >300. LANGSUNG dikoreksi suhu tanah.
-  // ═══════════════════════════════════════════════════════════
-  const Lf = [-1.6, -1.6, -1.6, 0.9, 3.8, 5.8, 6.4, 5.0, 2.4, 0.4, -1.6, -1.6][new Date().getMonth()];
-  const V = 0.36 * (T + 2.8) + Lf;
-  const DC0 = 15; // initial DC
-  // Koreksi DC dengan suhu tanah: tanah panas berarti gambut lebih kering dalam
-  const soilTempBonus = Math.max(0, (ST - 25) * 5); // setiap 1°C di atas 25°C = +5 DC
-  const soilDryFactor = Math.max(0, (100 - SM) / 100);
-  const dc = Math.min(800, Math.max(0, DC0 + 0.5 * Math.max(0, V) + soilTempBonus + soilDryFactor * 50));
-
-  // ═══════════════════════════════════════════════════════════
-  // ISI (Initial Spread Index) — Laju Penyebaran Api Awal
-  // Berbasis FFMC dan kecepatan angin (asumsi angin 10 km/h untuk daerah gambut)
-  // ═══════════════════════════════════════════════════════════
-  const W = 10; // kecepatan angin default (km/h) — data angin tidak tersedia
-  const fW = Math.exp(0.05039 * W);
-  const fm = 147.2 * (101 - ffmc) / (59.5 + ffmc);
-  const fF = 91.9 * Math.exp(-0.1386 * fm) * (1 + Math.pow(fm, 5.31) / (4.93e7));
-  const isi = Math.max(0, 0.208 * fW * fF);
-
-  // ═══════════════════════════════════════════════════════════
-  // BUI (Build-up Index) — Akumulasi Total Bahan Bakar Kering
-  // Kombinasi DMC dan DC.
-  // ═══════════════════════════════════════════════════════════
-  let bui: number;
-  if (dmc <= 0.4 * dc) {
-    bui = 0.8 * dmc * dc / (dmc + 0.4 * dc);
-  } else {
-    bui = dmc - (1 - 0.8 * dc / (dmc + 0.4 * dc)) * (0.92 + Math.pow(0.0114 * dmc, 1.7));
-  }
-  bui = Math.max(0, bui);
-
-  return {
-    ffmc: Math.round(ffmc * 10) / 10,
-    dmc: Math.round(dmc * 10) / 10,
-    dc: Math.round(dc * 10) / 10,
-    isi: Math.round(isi * 10) / 10,
-    bui: Math.round(bui * 10) / 10,
-  };
-}
-
-export function KarhutlaCard({ data, isOnline }: KarhutlaCardProps) {
+export function KarhutlaCard({ data, isOnline, weatherData, selectedLocationCode }: KarhutlaCardProps) {
   const [showFdrsDetails, setShowFdrsDetails] = useState(false);
 
-  // Level BMKG: 0=Rendah, 1=Sedang, 2=Tinggi, 3=Sangat Tinggi, 4=Darurat
+  const liveWeather = selectLiveBmkgConditions(weatherData, selectedLocationCode);
   const soilTemp = data?.soil_temp ?? null;
   const soilMoisture = data?.soil_moisture ?? null;
-  const fwiScore = data?.fwi ?? 0;
+  const airTemperature = data?.temperature ?? liveWeather?.temperature ?? null;
+  const airHumidity = data?.humidity ?? liveWeather?.humidity ?? null;
+  const derived = liveWeather && soilMoisture !== null && soilTemp !== null
+    ? calculateFwiComponents({
+        temperature: airTemperature ?? liveWeather.temperature,
+        humidity: airHumidity ?? liveWeather.humidity,
+        soilMoisture,
+        soilTemperature: soilTemp,
+        windSpeedKmh: liveWeather.wind_speed,
+        rainAmountMm: liveWeather.rain_amount,
+      })
+    : null;
 
-  // Hitung komponen FWI secara client-side jika data dari sensor tidak lengkap
-  const derived = calculateFwiComponents(
-    data?.temperature ?? null,
-    data?.humidity ?? null,
-    soilMoisture,
-    soilTemp
-  );
+  const ffmc = data?.ffmc ?? derived?.ffmc ?? null;
+  const dmc = data?.dmc ?? derived?.dmc ?? null;
+  const dc = data?.dc ?? derived?.dc ?? null;
+  const isi = data?.isi ?? derived?.isi ?? null;
+  const bui = data?.bui ?? derived?.bui ?? null;
+  const fwiScore = data?.fwi ?? derived?.fwi ?? null;
 
-  const ffmc = data?.ffmc ?? derived.ffmc;
-  const dmc = data?.dmc ?? derived.dmc;
-  const dc = data?.dc ?? derived.dc;
-  const isi = data?.isi ?? derived.isi;
-  const bui = data?.bui ?? derived.bui;
-
-  // Tentukan level bahaya BMKG (dengan override darurat jika suhu tanah >= 50°C)
-  let level = data?.fwi_level ?? 0;
+  let level: number | null = data?.fwi_level ?? null;
   if (soilTemp !== null && soilTemp >= 50.0) {
     level = 4;
-  } else if (fwiScore > 32) {
+  } else if (fwiScore !== null && fwiScore > 32) {
     level = 3;
-  } else if (fwiScore > 17) {
+  } else if (fwiScore !== null && fwiScore > 17) {
     level = 2;
-  } else if (fwiScore > 8) {
+  } else if (fwiScore !== null && fwiScore > 8) {
     level = 1;
-  } else {
+  } else if (fwiScore !== null) {
     level = 0;
   }
 
-  // Konfigurasi Level BMKG
+  // Konfigurasi level indeks estimasi
   const levelConfig = [
     {
       label: 'RENDAH (AMAN)',
@@ -202,7 +110,17 @@ export function KarhutlaCard({ data, isOnline }: KarhutlaCardProps) {
     },
   ];
 
-  const currentLevel = levelConfig[Math.min(Math.max(level, 0), 4)];
+  const currentLevel = level === null
+    ? {
+        ...levelConfig[0],
+        label: 'DATA BELUM CUKUP',
+        statusText: 'Indeks bahaya belum tersedia; menunggu data sensor atau BMKG real-time untuk lokasi terpilih.',
+        colorClass: 'text-slate-600 dark:text-slate-300',
+        badgeBg: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700',
+        glowBg: 'bg-slate-400',
+        recommendation: 'Status aman tidak dapat disimpulkan tanpa data FWI sensor atau data cuaca BMKG real-time yang cocok dengan lokasi.',
+      }
+    : levelConfig[Math.min(Math.max(level, 0), 4)];
 
   return (
     <div className="glass-card p-5 sm:p-6 flex flex-col relative overflow-hidden border border-slate-200 dark:border-slate-800 group shadow-md transition-all duration-300 hover:shadow-xl">
@@ -214,8 +132,8 @@ export function KarhutlaCard({ data, isOnline }: KarhutlaCardProps) {
       {/* Header Card */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4 relative z-10">
         <div className="flex items-center gap-3">
-          <div className={`p-2.5 rounded-2xl ${level >= 2 ? 'bg-amber-100 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400' : 'bg-blue-100 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400'}`}>
-            <Flame className={`w-6 h-6 ${level >= 3 ? 'animate-bounce text-rose-500' : ''}`} />
+          <div className={`p-2.5 rounded-2xl ${(level ?? 0) >= 2 ? 'bg-amber-100 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400' : 'bg-blue-100 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400'}`}>
+            <Flame className={`w-6 h-6 ${(level ?? 0) >= 3 ? 'animate-bounce text-rose-500' : ''}`} />
           </div>
           <div>
             <div className="flex items-center gap-2">
@@ -224,7 +142,7 @@ export function KarhutlaCard({ data, isOnline }: KarhutlaCardProps) {
               </h2>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-              Sistem Peringatan Dini FDRS BMKG (Fire Weather Index)
+              Indeks bahaya karhutla dari sensor dan cuaca BMKG terpilih
             </p>
           </div>
         </div>
@@ -244,12 +162,27 @@ export function KarhutlaCard({ data, isOnline }: KarhutlaCardProps) {
         </div>
       </div>
 
-      {/* Banner Utama Status FWI BMKG */}
+      <div
+        role="status"
+        className={`mb-4 rounded-xl border px-3 py-2 text-xs ${
+          liveWeather
+            ? 'border-green-200 bg-green-50 text-green-900 dark:border-green-800 dark:bg-green-950/40 dark:text-green-100'
+            : 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100'
+        }`}
+      >
+        {liveWeather
+          ? `BMKG real-time · ${weatherData?.location} · angin ${liveWeather.wind_speed} km/j · curah hujan prakiraan ${liveWeather.rain_amount} mm · indikasi hujan ${liveWeather.rain_chance}%`
+          : `Estimasi komponen tidak dihitung karena data BMKG real-time untuk lokasi terpilih tidak tersedia.${
+              weatherData?.fallback_reason ? ` ${weatherData.fallback_reason}` : ''
+            }`}
+      </div>
+
+      {/* Banner status indeks bahaya, bukan skor resmi BMKG */}
       <div className="mb-5 p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 relative z-10">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-              Tingkat Bahaya Karhutla (BMKG):
+              Tingkat Bahaya Karhutla (estimasi):
             </span>
           </div>
           <span className={`inline-flex items-center px-3 py-1 rounded-xl text-xs font-black uppercase border ${currentLevel.badgeBg}`}>
@@ -264,8 +197,15 @@ export function KarhutlaCard({ data, isOnline }: KarhutlaCardProps) {
         {/* FWI Score Bar */}
         <div>
           <div className="flex justify-between items-center text-xs mb-1 font-semibold">
-            <span className="text-slate-500 dark:text-slate-400">Skor FWI: <strong className={currentLevel.colorClass}>{formatOneDecimal(fwiScore)}</strong></span>
-            <span className="text-slate-500 dark:text-slate-400">Skala BMKG: 0 - 50+</span>
+            <span className="text-slate-500 dark:text-slate-400">
+              {data?.fwi !== null && data?.fwi !== undefined
+                ? 'Skor FWI node:'
+                : derived
+                  ? 'Estimasi FWI lokal:'
+                  : 'Skor FWI:'}{' '}
+              <strong className={currentLevel.colorClass}>{formatOneDecimal(fwiScore)}</strong>
+            </span>
+            <span className="text-slate-500 dark:text-slate-400">Bukan peringatan resmi BMKG</span>
           </div>
           <div className="h-2.5 w-full bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden flex">
             {/* Step 1: Rendah (0-8) */}
@@ -365,13 +305,17 @@ export function KarhutlaCard({ data, isOnline }: KarhutlaCardProps) {
 
       {/* Rekomendasi Tindakan / Pencegahan */}
       <div className={`p-3.5 rounded-2xl border mb-4 relative z-10 flex items-start gap-3 ${
-        level >= 3
+        level === null
+          ? 'bg-slate-50 border-slate-200 text-slate-700 dark:bg-slate-900/50 dark:border-slate-700 dark:text-slate-200'
+          : level >= 3
           ? 'bg-rose-50 border-rose-200 text-rose-900 dark:bg-rose-950/30 dark:border-rose-900 dark:text-rose-200'
           : level === 2
           ? 'bg-amber-50 border-amber-200 text-amber-900 dark:bg-amber-950/30 dark:border-amber-900 dark:text-amber-200'
           : 'bg-emerald-50 border-emerald-200 text-emerald-900 dark:bg-emerald-950/30 dark:border-emerald-900 dark:text-emerald-200'
       }`}>
-        {level >= 2 ? (
+        {level === null ? (
+          <Info className="w-5 h-5 flex-shrink-0 mt-0.5" />
+        ) : level >= 2 ? (
           <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
         ) : (
           <ShieldCheck className="w-5 h-5 flex-shrink-0 mt-0.5" />
@@ -382,7 +326,7 @@ export function KarhutlaCard({ data, isOnline }: KarhutlaCardProps) {
         </div>
       </div>
 
-      {/* Accordion Detail 6 Parameter FDRS BMKG */}
+      {/* Detail enam komponen */}
       <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden relative z-10">
         <button
           onClick={() => setShowFdrsDetails(!showFdrsDetails)}
@@ -390,7 +334,7 @@ export function KarhutlaCard({ data, isOnline }: KarhutlaCardProps) {
         >
           <span className="flex items-center gap-1.5">
             <Info className="w-3.5 h-3.5 text-blue-500" />
-            Detail 6 Komponen Indeks BMKG FDRS
+            Detail 6 Komponen Indeks Karhutla
           </span>
           {showFdrsDetails ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </button>
@@ -424,16 +368,17 @@ export function KarhutlaCard({ data, isOnline }: KarhutlaCardProps) {
                 <span className="text-[10px] text-slate-400 block">Total bahan kering</span>
               </div>
               <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/40">
-                <span className="text-slate-500 font-medium block">FWI (Indeks Akhir):</span>
+                <span className="text-slate-500 font-medium block">FWI (indeks akhir):</span>
                 <span className={`text-sm font-black ${currentLevel.colorClass}`}>{formatOneDecimal(fwiScore)}</span>
                 <span className="text-[10px] text-slate-400 block">Tingkat bahaya api</span>
               </div>
             </div>
             <p className="pt-2 text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-              * Perhitungan menggunakan model Van Wagner 1987 yang diadopsi resmi oleh BMKG pada sistem SPARTAN. 
-              Khusus lahan gambut, nilai DC (Drought Code) dikoreksi langsung oleh data sensor kelembaban kapasitif 
-              dan probe suhu kedalaman DS18B20. Nilai FFMC/DMC/DC/ISI/BUI dihitung otomatis dari data suhu & 
-              kelembapan apabila tidak dikirim langsung oleh ESP32.
+              * Ini estimasi lokal, bukan produk atau peringatan resmi BMKG.               komponen estimasi memakai suhu, kelembapan,
+              angin dan curah hujan prakiraan BMKG sebagai proxy untuk lokasi tersimpan serta sensor Node 3; indikasi hujan
+              hasil kode cuaca hanya konteks, bukan probabilitas resmi. Kode awal dan riwayat cuaca harian
+              yang diperlukan untuk kalkulasi FWI resmi tidak tersedia di aplikasi. Jika data BMKG fallback/tidak cocok,
+              komponen yang tidak dikirim oleh sensor dibiarkan kosong.
             </p>
           </div>
         )}

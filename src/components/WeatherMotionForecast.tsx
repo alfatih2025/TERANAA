@@ -75,7 +75,9 @@ export function WeatherMotionForecast({ data, loading, error, locationLabel }: W
       <div className={`bg-gradient-to-br ${currentMeta.accent} p-6 text-white`}>
         <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
-            <p className="text-xs uppercase tracking-[0.25em] text-white/80">Prakiraan BMKG</p>
+            <p className="text-xs uppercase tracking-[0.25em] text-white/80">
+              {data.source === 'bmkg' ? 'Prakiraan BMKG real-time' : 'Data cuaca fallback'}
+            </p>
             <h3 className="mt-2 truncate text-2xl font-bold">{locationLabel}</h3>
             <p className="mt-1 text-sm text-white/90">
               {new Intl.DateTimeFormat('id-ID', {
@@ -102,7 +104,7 @@ export function WeatherMotionForecast({ data, loading, error, locationLabel }: W
           </div>
         </div>
 
-        <div className="mt-6 grid gap-3 sm:grid-cols-3">
+        <div className="mt-6 grid gap-3 sm:grid-cols-4">
           <div className="rounded-2xl bg-white/12 p-4 backdrop-blur-sm">
             <div className="flex items-center gap-2 text-white/80">
               <Droplets size={16} />
@@ -120,6 +122,13 @@ export function WeatherMotionForecast({ data, loading, error, locationLabel }: W
           <div className="rounded-2xl bg-white/12 p-4 backdrop-blur-sm">
             <div className="flex items-center gap-2 text-white/80">
               <Waves size={16} />
+              <span className="text-xs uppercase tracking-wide">Indikasi hujan*</span>
+            </div>
+            <p className="mt-3 text-2xl font-semibold">{data.current.rain_chance}%</p>
+          </div>
+          <div className="rounded-2xl bg-white/12 p-4 backdrop-blur-sm">
+            <div className="flex items-center gap-2 text-white/80">
+              <Waves size={16} />
               <span className="text-xs uppercase tracking-wide">Curah hujan</span>
             </div>
             <p className="mt-3 text-2xl font-semibold">{data.current.rain_amount} mm</p>
@@ -128,6 +137,23 @@ export function WeatherMotionForecast({ data, loading, error, locationLabel }: W
       </div>
 
       <div className="p-6">
+        <p
+          role="status"
+          className={`mb-4 rounded-lg px-3 py-2 text-xs ${
+            data.source === 'bmkg'
+              ? 'bg-green-50 text-green-800 dark:bg-green-950/40 dark:text-green-200'
+              : 'bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200'
+          }`}
+        >
+          {data.source === 'bmkg'
+            ? `Data BMKG real-time untuk ${data.location}.`
+            : `Data ini bukan kondisi BMKG real-time${data.fallback_reason ? `: ${data.fallback_reason}` : '.'}`}
+        </p>
+        {data.source === 'bmkg' && (
+          <p className="mb-4 text-[11px] text-gray-500 dark:text-gray-400">
+            * Indikasi hujan diturunkan dari kode cuaca BMKG; bukan probabilitas resmi. Curah hujan adalah nilai prakiraan per periode.
+          </p>
+        )}
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
             <h4 className="text-lg font-semibold text-gray-800 dark:text-gray-100">Prakiraan per waktu</h4>

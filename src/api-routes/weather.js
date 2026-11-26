@@ -100,6 +100,7 @@ function createFallbackWeather(locationCode, location, reason) {
       humidity: Math.max(45, Math.min(96, humidity + ((index % 4) - 2) * 3)),
       weather: condition,
       rain_chance: condition.includes('Hujan') ? 55 : condition === 'Berawan' ? 24 : 10,
+      rain_amount: 0,
     };
   });
 
@@ -115,6 +116,8 @@ function createFallbackWeather(locationCode, location, reason) {
       rain_chance: forecast[0].rain_chance,
     },
     forecast,
+    source: 'fallback',
+    fallback_reason: reason,
     _fallback: true,
     _reason: reason,
   };
@@ -228,9 +231,19 @@ function transformBmkgWeather(data, fallbackLocation = DEFAULT_WEATHER.location)
     );
   }
 
+  const requiredValues = [currentForecast.t, currentForecast.hu, currentForecast.ws, currentForecast.tp];
+  if (requiredValues.some((value) => value === undefined || value === null || !Number.isFinite(Number(value)))) {
+    return createFallbackWeather(
+      resolveLocationCode(root?.lokasi?.adm4 || root?.location_code || root?.adm4 || DEFAULT_LOCATION_CODE),
+      formatLocation(root?.lokasi, fallbackLocation),
+      'Respons BMKG tidak menyertakan seluruh input cuaca yang diperlukan',
+    );
+  }
+
   return {
     location_code: resolveLocationCode(root?.lokasi?.adm4 || root?.location_code || root?.adm4 || DEFAULT_LOCATION_CODE),
     location: formatLocation(root?.lokasi || root?.lokasi_terpilih, fallbackLocation),
+    source: 'bmkg',
     current: {
       temperature: toNumber(currentForecast.t, DEFAULT_WEATHER.current.temperature),
       humidity: toNumber(currentForecast.hu, DEFAULT_WEATHER.current.humidity),
@@ -322,6 +335,14 @@ export default async function handler(req, res) {
     }
 
     const weatherData = transformBmkgWeather(bmkgData, resolveLocationLabel(normalizedCode));
+    if (weatherData.source !== 'bmkg') {
+    return res.status(200).json({
+      ...weatherData,
+      location_code: normalizedCode,
+      source: 'fallback',
+      fallback_reason: weatherData.fallback_reason || 'Respons BMKG tidak dapat digunakan untuk kalkulasi cuaca',
+    });
+    }
     weatherData.location_code = normalizedCode;
 
     if (supabase) {

@@ -30,6 +30,8 @@ type BmkgResponse = {
 
 const DEFAULT_WEATHER: WeatherData = {
   location: 'Lokasi BMKG',
+  source: 'fallback',
+  fallback_reason: 'Data cuaca BMKG real-time tidak tersedia',
   current: {
     temperature: 28,
     humidity: 75,
@@ -85,8 +87,8 @@ function formatWeatherDescription(forecast?: BmkgForecast) {
   return DEFAULT_WEATHER.current.weather;
 }
 
-function extractForecastRows(data: BmkgResponse | BmkgResponse[]) {
-  const root = Array.isArray(data) ? data[0] : data;
+function extractForecastRows(data: unknown) {
+  const root = (Array.isArray(data) ? data[0] : data) as BmkgResponse | undefined;
   const candidates = [
     root?.data?.[0]?.cuaca,
     root?.data?.[0]?.forecast,
@@ -124,8 +126,8 @@ function selectCurrentForecastIndex(forecasts: BmkgForecast[]) {
   return selectedIndex;
 }
 
-export function transformBmkgWeather(data: BmkgResponse | BmkgResponse[], fallbackLocation = DEFAULT_WEATHER.location): WeatherData {
-  const root = Array.isArray(data) ? data[0] : data;
+export function transformBmkgWeather(data: unknown, fallbackLocation = DEFAULT_WEATHER.location): WeatherData {
+  const root = (Array.isArray(data) ? data[0] : data) as BmkgResponse | undefined;
   const forecasts = extractForecastRows(data);
   const currentIndex = selectCurrentForecastIndex(forecasts);
   const currentForecast = forecasts[currentIndex];
@@ -135,11 +137,23 @@ export function transformBmkgWeather(data: BmkgResponse | BmkgResponse[], fallba
     return {
       ...DEFAULT_WEATHER,
       location: formatLocation(root?.lokasi, fallbackLocation),
+      fallback_reason: 'Respons BMKG tidak memiliki data prakiraan',
+    };
+  }
+
+  const requiredValues = [currentForecast.t, currentForecast.hu, currentForecast.ws, currentForecast.tp];
+  if (requiredValues.some((value) => value === undefined || value === null || !Number.isFinite(Number(value)))) {
+    return {
+      ...DEFAULT_WEATHER,
+      location: formatLocation(root?.lokasi, fallbackLocation),
+      fallback_reason: 'Respons BMKG tidak menyertakan seluruh input cuaca yang diperlukan',
     };
   }
 
   return {
     location: formatLocation(root?.lokasi, fallbackLocation),
+    source: 'bmkg',
+    fallback_reason: undefined,
     current: {
       temperature: toNumber(currentForecast.t, DEFAULT_WEATHER.current.temperature),
       humidity: toNumber(currentForecast.hu, DEFAULT_WEATHER.current.humidity),
@@ -201,12 +215,15 @@ export function createStaticWeatherFallback(locationCode: string, locationLabel:
   return {
     location: locationLabel,
     location_code: locationCode,
+    source: 'fallback',
+    fallback_reason: 'Data cuaca BMKG real-time tidak tersedia',
     current: {
       temperature,
       humidity,
       weather,
       wind_speed: windSpeed,
       rain_chance: rainChance,
+      rain_amount: 0,
     },
     forecast,
   };

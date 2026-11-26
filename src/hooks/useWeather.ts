@@ -5,6 +5,8 @@ import { createStaticWeatherFallback, transformBmkgWeather } from '../lib/bmkgWe
 export interface WeatherData {
   location: string;
   location_code?: string;
+  source: 'bmkg' | 'fallback';
+  fallback_reason?: string;
   current: {
     temperature: number;
     humidity: number;
@@ -19,6 +21,7 @@ export interface WeatherData {
     humidity: number;
     weather: string;
     rain_chance: number;
+    rain_amount: number;
   }>;
 }
 
@@ -62,8 +65,8 @@ function readWeatherCache(locationCode: string) {
   }
 }
 
-function normalizeWeatherData(locationCode: string, data: WeatherData | null | undefined, fallbackLabel: string, pathLabel: string): WeatherData {
-  const safe = data && typeof data === 'object' ? data : null;
+function normalizeWeatherData(locationCode: string, data: unknown, fallbackLabel: string, pathLabel: string): WeatherData {
+  const safe = data && typeof data === 'object' ? data as Partial<WeatherData> : null;
   const isKnownLocation = pathLabel !== locationCode && !fallbackLabel.startsWith('Lokasi BMKG');
   const bestLocation = isKnownLocation ? pathLabel : (safe?.location ?? fallbackLabel);
   const current = safe?.current ?? {
@@ -83,12 +86,19 @@ function normalizeWeatherData(locationCode: string, data: WeatherData | null | u
         humidity: Number(item?.humidity ?? 0) || 0,
         weather: String(item?.weather ?? 'Cerah Berawan'),
         rain_chance: Number(item?.rain_chance ?? 0) || 0,
+        rain_amount: Number(item?.rain_amount ?? 0) || 0,
       }))
     : [];
 
   return {
     location: String(bestLocation),
     location_code: locationCode,
+    source: safe?.source === 'bmkg' ? 'bmkg' : 'fallback',
+    fallback_reason: typeof safe?.fallback_reason === 'string'
+      ? safe.fallback_reason
+      : safe?.source === 'bmkg'
+        ? undefined
+        : 'Data cuaca BMKG real-time tidak tersedia',
     current: {
       temperature: Number(current.temperature) || 0,
       humidity: Number(current.humidity) || 0,
@@ -166,7 +176,7 @@ export function useWeather(locationCode?: string | null) {
 
         if (response.ok) {
           const weather = await readJsonResponse(response, 'API cuaca');
-          const resolved = normalizeWeatherData(normalizedLocation, { ...weather, location_code: normalizedLocation }, fallbackLabel, pathLabel);
+          const resolved = normalizeWeatherData(normalizedLocation, weather, fallbackLabel, pathLabel);
           if (!isCurrentRequest()) return;
           setData(resolved);
           writeWeatherCache(normalizedLocation, resolved);

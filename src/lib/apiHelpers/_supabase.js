@@ -217,6 +217,8 @@ const mockSupabase = {
   from: (tableName) => createQueryChain(tableName),
 };
 
+export const isSupabaseConfigured = Boolean(realSupabase);
+
 const supabase = new Proxy(
   {},
   {

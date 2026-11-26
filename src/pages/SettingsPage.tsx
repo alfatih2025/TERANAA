@@ -41,10 +41,7 @@ export function SettingsPage() {
 
   const [formData, setFormData] = useState<Partial<SettingsType>>({});
   const [isDirty, setIsDirty] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
-  // Status pengiriman MQTT ke ESP32, terpisah dari status simpan ke database.
-  // Sebelumnya hasil sendCommand() dibuang begitu saja sehingga kegagalan MQTT
-  // tidak pernah terlihat di UI.
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [syncError, setSyncError] = useState<string | null>(null);
   const [wifiSsid, setWifiSsid] = useState('');
   const [wifiPassword, setWifiPassword] = useState('');
@@ -113,28 +110,8 @@ export function SettingsPage() {
       soil_threshold_critical: Number(formData.soil_threshold_critical ?? settings?.soil_threshold_critical ?? phaseProfile.criticalSoil),
     };
 
-    // Bug #2 Fix: Simpan ke API database dulu (tapi jangan blokir pengiriman MQTT jika gagal).
-    // updateSettings() dari hooks/useSettings tidak pernah throw — jika API gagal,
-    // ia return payload lokal sehingga normalized selalu valid.
-    let normalized: SettingsType;
-    try {
-      normalized = await updateSettings(payload);
-    } catch {
-      // Fallback ke payload lokal agar MQTT tetap bisa dikirim walau API bermasalah
-      normalized = payload as SettingsType;
-    }
-
-    // DEBUG: pastikan payload threshold valid dan benar-benar dikirim ke MQTT.
-    // Buka DevTools Console di browser untuk melihat output ini.
-    console.log('[SettingsPage] settings_sync payload', {
-      soil_threshold_low: normalized.soil_threshold_low,
-      soil_threshold_high: normalized.soil_threshold_high,
-      soil_threshold_critical: normalized.soil_threshold_critical,
-      watering_time: normalized.watering_time,
-      watering_duration: normalized.watering_duration,
-      watering_enabled: normalized.watering_enabled,
-      plant_phase: normalized.plant_phase,
-    });
+    const databaseResult = await updateSettings(payload);
+    const normalized = databaseResult.settings;
 
     const weatherForecastSummary = weatherData?.forecast?.length
       ? weatherData.forecast
@@ -150,9 +127,6 @@ export function SettingsPage() {
       : null;
 
     try {
-      // Bug #2 Fix: Pengiriman MQTT ke ESP32 SELALU dijalankan, tidak bergantung pada
-      // keberhasilan API database di atas. sendCommand() sudah punya timeout internal
-      // (~10 detik) dan SELALU resolve dengan { success, error } — tidak pernah throw.
       const [settingsSyncResult, scheduleSetResult] = await Promise.all([
         sendCommand('settings_sync', undefined, {
           plant_phase: normalized.plant_phase,
@@ -183,46 +157,51 @@ export function SettingsPage() {
         }),
       ]);
 
-      const failedCommands: string[] = [];
-      if (!settingsSyncResult.success) failedCommands.push('settings_sync');
-      if (!scheduleSetResult.success) failedCommands.push('schedule_set');
-      const mqttSynced = failedCommands.length === 0;
+      const mqttSynced = settingsSyncResult.success && scheduleSetResult.success;
+      const databaseMessage = databaseResult.databaseStatus === 'saved'
+        ? 'Database berhasil menyimpan pengaturan.'
+        : databaseResult.databaseStatus === 'partial'
+          ? `Database menyimpan sebagian pengaturan. ${databaseResult.databaseError || ''}`.trim()
+          : `Database gagal menyimpan pengaturan: ${databaseResult.databaseError || 'kesalahan tidak diketahui'}`;
+      const settingsSyncMessage = settingsSyncResult.success
+        ? 'Publish MQTT settings_sync berhasil.'
+        : `Publish MQTT settings_sync gagal: ${settingsSyncResult.error || 'kesalahan tidak diketahui'}`;
+      const scheduleSetMessage = scheduleSetResult.success
+        ? 'Publish MQTT schedule_set berhasil.'
+        : `Publish MQTT schedule_set gagal: ${scheduleSetResult.error || 'kesalahan tidak diketahui'}`;
+      const fullySaved = databaseResult.databaseStatus === 'saved' && mqttSynced;
+      const messages = [databaseMessage, settingsSyncMessage, scheduleSetMessage];
 
       recordActivity({
         source: 'settings',
-        type: 'settings_saved',
-        title: 'Pengaturan disimpan',
-        message: mqttSynced
-          ? `Fase ${normalized.plant_phase} dan ambang batas sensor berhasil diperbarui & dikirim ke ESP32.`
-          : `Fase ${normalized.plant_phase} dan ambang batas sensor tersimpan di database, tapi GAGAL dikirim ke ESP32 (${failedCommands.join(', ')}).`,
+        type: fullySaved ? 'settings_saved' : 'settings_save_failed',
+        title: fullySaved ? 'Pengaturan disimpan' : 'Hasil penyimpanan pengaturan',
+        message: `${databaseMessage} ${settingsSyncMessage} ${scheduleSetMessage}`,
         details: {
           phase: normalized.plant_phase,
           location: normalized.location,
           temp: [normalized.temp_threshold_low, normalized.temp_threshold_high],
           humidity: [normalized.humidity_threshold_low, normalized.humidity_threshold_high],
           soil: [normalized.soil_threshold_low, normalized.soil_threshold_high, normalized.soil_threshold_critical],
+          database_status: databaseResult.databaseStatus,
+          database_unsupported_columns: databaseResult.unsupportedColumns,
+          settings_sync_success: settingsSyncResult.success,
+          settings_sync_error: settingsSyncResult.error,
+          schedule_set_success: scheduleSetResult.success,
+          schedule_set_error: scheduleSetResult.error,
           mqtt_synced: mqttSynced,
         },
       });
 
       setFormData(normalized);
       setIsDirty(false);
-      setSaveStatus('saved');
+      setSaveStatus(databaseResult.databaseStatus === 'saved' ? 'saved' : 'error');
+      setSyncError(fullySaved ? null : messages.join(' '));
 
-      if (!mqttSynced) {
-        // Data sudah aman di database, tapi ESP32 belum tentu menerima
-        // perubahan ini. Tampilkan alasannya supaya tidak menyesatkan.
-        const reason = settingsSyncResult.error || scheduleSetResult.error || 'MQTT tidak terkirim';
-        setSyncError(`Tersimpan, tapi gagal dikirim ke ESP32 (${failedCommands.join(', ')}): ${reason}`);
-      } else {
-        setSyncError(null);
-      }
-
-      setTimeout(() => setSaveStatus('idle'), 2500);
+      if (fullySaved) setTimeout(() => setSaveStatus('idle'), 2500);
     } catch (err) {
-      setIsDirty(false);
-      setSaveStatus('idle');
-      setSyncError(err instanceof Error ? err.message : 'Gagal mengirim perintah ke ESP32');
+      setSaveStatus('error');
+      setSyncError(err instanceof Error ? err.message : 'Gagal menyimpan atau memublikasikan pengaturan');
     }
   };
 
@@ -444,10 +423,10 @@ export function SettingsPage() {
       <div className="flex items-center justify-between">
         <div className="text-sm">
           {saveStatus === 'saved' && !syncError && (
-            <span role="status" className="text-gray-700 dark:text-gray-100">Pengaturan tersimpan &amp; berhasil dikirim ke ESP32.</span>
+            <span role="status" className="text-gray-700 dark:text-gray-100">Database tersimpan dan publish MQTT settings_sync serta schedule_set berhasil.</span>
           )}
-          {saveStatus === 'saved' && syncError && (
-            <span role="alert" className="inline-block rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 font-medium text-amber-950 dark:border-amber-400/50 dark:bg-amber-950/80 dark:text-amber-50">{syncError}</span>
+          {(saveStatus === 'saved' || saveStatus === 'error') && syncError && (
+            <span role="alert" className={`inline-block rounded-lg border px-3 py-2 font-medium ${saveStatus === 'error' ? 'border-red-200 bg-red-50 text-red-900 dark:border-red-400/50 dark:bg-red-950/80 dark:text-red-50' : 'border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-400/50 dark:bg-amber-950/80 dark:text-amber-50'}`}>{syncError}</span>
           )}
         </div>
         <button onClick={handleSave} disabled={!isAdmin} className={`rounded-xl px-6 py-3 font-semibold shadow-sm ${!isAdmin ? "bg-slate-300 text-slate-500 cursor-not-allowed" : "bg-green-600 text-white hover:bg-green-700"}`} >

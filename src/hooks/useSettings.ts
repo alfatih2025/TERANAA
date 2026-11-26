@@ -36,6 +36,13 @@ export interface Settings {
   ai_max_tokens: number;
 }
 
+export interface SettingsUpdateResult {
+  settings: Settings;
+  databaseStatus: 'saved' | 'partial' | 'failed';
+  databaseError?: string;
+  unsupportedColumns?: string[];
+}
+
 const DEFAULT_PHASE = 'vegetatif' as const;
 const phaseDefaults = getPhaseDefaults(DEFAULT_PHASE);
 const STORAGE_KEY = 'nexagrow-settings-cache-v3';
@@ -251,20 +258,33 @@ export function useSettings() {
           const message = result?.error || `Gagal menyimpan pengaturan (${res.status})`;
           setError(message);
           if (options.requireRemote) throw new Error(message);
-          return payload;
+          return { settings: payload, databaseStatus: 'failed', databaseError: message } satisfies SettingsUpdateResult;
         }
 
-        const data = await res.json();
-        const normalized = syncLocalSettings(normalizeSettings(data));
-        setError(null);
-        return normalized;
+        const response = await res.json();
+        const persistence = response?._persistence as { status?: string; unsupported_columns?: unknown } | undefined;
+        const unsupportedColumns = Array.isArray(persistence?.unsupported_columns)
+          ? persistence.unsupported_columns.filter((column: unknown): column is string => typeof column === 'string')
+          : [];
+        const settingsData = { ...(response || {}) };
+        delete settingsData._persistence;
+        const normalized = syncLocalSettings(normalizeSettings({ ...payload, ...settingsData }));
+        const databaseStatus = unsupportedColumns.length || persistence?.status === 'partial' ? 'partial' : 'saved';
+        const databaseError = databaseStatus === 'partial'
+          ? `Kolom database belum tersedia: ${unsupportedColumns.join(', ') || 'sebagian pengaturan'}`
+          : undefined;
+        if (databaseStatus === 'partial' && options.requireRemote) {
+          throw new Error(databaseError);
+        }
+        setError(databaseError ?? null);
+        return { settings: normalized, databaseStatus, databaseError, unsupportedColumns } satisfies SettingsUpdateResult;
       } catch (err) {
         // Tetap gunakan payload lokal agar dashboard/cuaca tidak balik ke nilai lama.
         // Ini penting karena MQTT ke ESP32 tetap harus tetap bisa dikirim meski API gagal.
         const message = err instanceof Error ? err.message : 'Unknown error';
         setError(message);
         if (options.requireRemote) throw err;
-        return payload;
+        return { settings: payload, databaseStatus: 'failed', databaseError: message } satisfies SettingsUpdateResult;
       } finally {
         setLoading(false);
       }

@@ -1,4 +1,4 @@
-import supabase from '../lib/apiHelpers/_supabase.js';
+import supabase, { isSupabaseConfigured } from '../lib/apiHelpers/_supabase.js';
 import { requireFirebaseAdmin } from '../lib/apiHelpers/_auth.js';
 
 const DEFAULT_LOCATION_CODE = '33.74.07.1010';
@@ -139,7 +139,6 @@ function normalizeSettings(input = {}) {
 const SETTINGS_DB_COLUMNS = new Set([
   'id',
   'plant_phase',
-  'crop_mode',
   'location',
   'temp_threshold_high',
   'temp_threshold_low',
@@ -156,7 +155,6 @@ const SETTINGS_DB_COLUMNS = new Set([
   'user_name',
   'user_email',
   'updated_at',
-  'soil_moisture_threshold',
   'ai_mode',
   'ai_primary_provider',
   'ai_primary_model',
@@ -175,6 +173,20 @@ function filterSettingsForDatabase(input = {}) {
   );
 }
 
+function getMissingSettingsColumn(error) {
+  if (!['PGRST204', '42703'].includes(error?.code)) return null;
+
+  const message = [error.message, error.details, error.hint].filter(Boolean).join(' ');
+  const match = message.match(
+    /(?:column\s+["']?(?:[\w]+\.)?([a-z_]\w*)["']?\s+does not exist|the\s+["']?([a-z_]\w*)["']?\s+column)/i,
+  );
+  return match?.[1] || match?.[2] || null;
+}
+
+function isMissingSettingsTable(error) {
+  return ['PGRST205', '42P01'].includes(error?.code);
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
@@ -183,7 +195,7 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === 'GET') {
-      if (!supabase) return res.status(503).json({ error: 'Database not configured' });
+      if (!isSupabaseConfigured) return res.status(503).json({ error: 'Database not configured' });
 
       const { data, error } = await supabase
         .from('settings')
@@ -196,6 +208,9 @@ export default async function handler(req, res) {
           // No rows found, safe to return default
           return res.status(200).json(normalizeSettings(DEFAULT_SETTINGS));
         }
+        if (isMissingSettingsTable(error)) {
+          return res.status(503).json({ error: 'Settings table is not available in the database' });
+        }
         // Any other error (connection, etc) should fail so frontend uses localStorage
         return res.status(500).json({ error: error.message });
       }
@@ -207,22 +222,33 @@ export default async function handler(req, res) {
       const user = await requireFirebaseAdmin(req, res);
       if (!user) return;
 
+      if (!isSupabaseConfigured) {
+        return res.status(503).json({ error: 'Database not configured; settings were not saved' });
+      }
+
       const updates = req.body || {};
       const payload = normalizeSettings(updates);
       const dbPayload = filterSettingsForDatabase(payload);
 
-      if (!supabase) {
-        console.warn('[api/settings] Supabase not configured; returning normalized payload locally');
-        return res.status(200).json(payload);
+      const unsupportedColumns = [];
+      let data = null;
+      while (true) {
+        const result = await supabase
+          .from('settings')
+          .upsert(dbPayload)
+          .select()
+          .single();
+        if (!result.error) {
+          data = result.data;
+          break;
+        }
+
+        const missingColumn = getMissingSettingsColumn(result.error);
+        if (!missingColumn || missingColumn === 'id' || !Object.hasOwn(dbPayload, missingColumn)) throw result.error;
+        delete dbPayload[missingColumn];
+        unsupportedColumns.push(missingColumn);
+        console.warn(`[api/settings] Retrying without unavailable settings column "${missingColumn}"`);
       }
-
-      const { data, error } = await supabase
-        .from('settings')
-        .upsert(dbPayload)
-        .select()
-        .single();
-
-      if (error) throw error;
 
       await supabase.from('activity_logs').insert({
         type: 'settings',
@@ -230,12 +256,19 @@ export default async function handler(req, res) {
         details: updates,
       }).catch(() => {});
 
-      return res.status(200).json(normalizeSettings(data || payload));
+      return res.status(200).json({
+        ...normalizeSettings({ ...payload, ...(data || {}) }),
+        _persistence: {
+          status: unsupportedColumns.length ? 'partial' : 'saved',
+          unsupported_columns: unsupportedColumns,
+        },
+      });
     }
 
     res.status(405).json({ error: 'Method not allowed' });
   } catch (err) {
     console.error('Settings API error:', err);
-    res.status(500).json({ error: err instanceof Error ? err.message : 'Unknown error' });
+    const status = isMissingSettingsTable(err) ? 503 : 500;
+    res.status(status).json({ error: err instanceof Error ? err.message : 'Unknown error' });
   }
 }

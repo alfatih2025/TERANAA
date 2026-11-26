@@ -4,7 +4,7 @@ import { CloudSun, ChevronDown, Save, MapPin, Navigation2 } from 'lucide-react';
 import { WeatherMotionForecast } from '../components/WeatherMotionForecast';
 import { useWeather } from '../hooks/useWeather';
 import { useControl } from '../hooks/useControl';
-import type { Settings } from '../hooks/useSettings';
+import type { Settings, SettingsUpdateResult } from '../hooks/useSettings';
 import {
   DEFAULT_WEATHER_LOCATION_CODE,
   WEATHER_LOCATION_CATEGORIES,
@@ -24,7 +24,7 @@ import { recordActivity } from '../lib/activityLog';
 interface WeatherPageProps {
   locationCode?: string;
   settings?: Settings | null;
-  updateSettings?: (updates: Partial<Settings>) => Promise<Settings>;
+  updateSettings?: (updates: Partial<Settings>) => Promise<SettingsUpdateResult>;
 }
 
 type WeatherSelection = {
@@ -136,7 +136,7 @@ function resolveSelection(next: Partial<WeatherSelection>, previous: WeatherSele
 export function WeatherPage({ locationCode, settings, updateSettings }: WeatherPageProps) {
     const initialCode = normalizeWeatherLocationCode(locationCode || settings?.location || readStoredSelection() || DEFAULT_WEATHER_LOCATION_CODE);
   const [selection, setSelection] = useState<WeatherSelection>(resolveSelectionFromCode(initialCode));
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [saveError, setSaveError] = useState<string | null>(null);
   const [bmkgVillages, setBmkgVillages] = useState<BmkgVillageLocation[]>([]);
   const [loadingVillages, setLoadingVillages] = useState(false);
@@ -253,7 +253,8 @@ export function WeatherPage({ locationCode, settings, updateSettings }: WeatherP
     setSaveError(null);
     try {
       const payload: Partial<Settings> = { location: weatherCode };
-      const normalized = await updateSettings(payload);
+      const databaseResult = await updateSettings(payload);
+      const normalized = databaseResult.settings;
       persistStoredSelection(normalized.location);
       setSelection((prev) => ({ ...prev, locationCode: normalized.location }));
 
@@ -270,48 +271,73 @@ export function WeatherPage({ locationCode, settings, updateSettings }: WeatherP
             .join(' | ')
         : null;
 
-      await sendCommand('settings_sync', undefined, {
-        plant_phase: normalized.plant_phase,
-        location: normalized.location,
-        weather_location: normalized.location,
-        weather_condition: data?.current.weather,
-        weather_rain_chance: data?.current.rain_chance,
-        weather_temperature: data?.current.temperature,
-        weather_forecast: weatherForecastSummary,
-        temp_threshold_low: normalized.temp_threshold_low,
-        temp_threshold_high: normalized.temp_threshold_high,
-        humidity_threshold_low: normalized.humidity_threshold_low,
-        humidity_threshold_high: normalized.humidity_threshold_high,
-        soil_threshold_low: normalized.soil_threshold_low,
-        soil_threshold_high: normalized.soil_threshold_high,
-        soil_threshold_critical: normalized.soil_threshold_critical,
-        watering_time: normalized.watering_time,
-        watering_duration: normalized.watering_duration,
-        watering_enabled: normalized.watering_enabled,
-        auto_report: normalized.auto_report,
-        report_time: normalized.report_time,
-      }).catch(() => undefined);
+      const [settingsSyncResult, scheduleSetResult] = await Promise.all([
+        sendCommand('settings_sync', undefined, {
+          plant_phase: normalized.plant_phase,
+          location: normalized.location,
+          weather_location: normalized.location,
+          weather_condition: data?.current.weather,
+          weather_rain_chance: data?.current.rain_chance,
+          weather_temperature: data?.current.temperature,
+          weather_forecast: weatherForecastSummary,
+          temp_threshold_low: normalized.temp_threshold_low,
+          temp_threshold_high: normalized.temp_threshold_high,
+          humidity_threshold_low: normalized.humidity_threshold_low,
+          humidity_threshold_high: normalized.humidity_threshold_high,
+          soil_threshold_low: normalized.soil_threshold_low,
+          soil_threshold_high: normalized.soil_threshold_high,
+          soil_threshold_critical: normalized.soil_threshold_critical,
+          watering_time: normalized.watering_time,
+          watering_duration: normalized.watering_duration,
+          watering_enabled: normalized.watering_enabled,
+          auto_report: normalized.auto_report,
+          report_time: normalized.report_time,
+        }),
+        sendCommand('schedule_set', undefined, {
+          watering_time: normalized.watering_time,
+          watering_duration: normalized.watering_duration,
+          schedule_enabled: normalized.watering_enabled,
+          watering_enabled: normalized.watering_enabled,
+        }),
+      ]);
 
-
-      await sendCommand('schedule_set', undefined, {
-        watering_time: normalized.watering_time,
-        watering_duration: normalized.watering_duration,
-        schedule_enabled: normalized.watering_enabled,
-        watering_enabled: normalized.watering_enabled,
-      }).catch(() => undefined);
+      const databaseMessage = databaseResult.databaseStatus === 'saved'
+        ? 'Database berhasil menyimpan pengaturan.'
+        : databaseResult.databaseStatus === 'partial'
+          ? `Database menyimpan sebagian pengaturan. ${databaseResult.databaseError || ''}`.trim()
+          : `Database gagal menyimpan pengaturan: ${databaseResult.databaseError || 'kesalahan tidak diketahui'}`;
+      const settingsSyncMessage = settingsSyncResult.success
+        ? 'Publish MQTT settings_sync berhasil.'
+        : `Publish MQTT settings_sync gagal: ${settingsSyncResult.error || 'kesalahan tidak diketahui'}`;
+      const scheduleSetMessage = scheduleSetResult.success
+        ? 'Publish MQTT schedule_set berhasil.'
+        : `Publish MQTT schedule_set gagal: ${scheduleSetResult.error || 'kesalahan tidak diketahui'}`;
+      const fullySaved = databaseResult.databaseStatus === 'saved'
+        && settingsSyncResult.success
+        && scheduleSetResult.success;
 
       recordActivity({
         source: 'weather',
-        type: 'weather_location_saved',
-        title: 'Lokasi cuaca disimpan',
-        message: `Lokasi prakiraan disetel ke ${selectedLabel}.`,
-        details: { location: normalized.location, label: selectedLabel },
+        type: fullySaved ? 'weather_location_saved' : 'weather_location_save_failed',
+        title: fullySaved ? 'Lokasi cuaca disimpan' : 'Hasil penyimpanan lokasi cuaca',
+        message: `${databaseMessage} ${settingsSyncMessage} ${scheduleSetMessage}`,
+        details: {
+          location: normalized.location,
+          label: selectedLabel,
+          database_status: databaseResult.databaseStatus,
+          database_unsupported_columns: databaseResult.unsupportedColumns,
+          settings_sync_success: settingsSyncResult.success,
+          settings_sync_error: settingsSyncResult.error,
+          schedule_set_success: scheduleSetResult.success,
+          schedule_set_error: scheduleSetResult.error,
+        },
       });
-      setSaveState('saved');
-      setTimeout(() => setSaveState('idle'), 2000);
+      setSaveState(fullySaved ? 'saved' : 'error');
+      setSaveError(fullySaved ? null : `${databaseMessage} ${settingsSyncMessage} ${scheduleSetMessage}`);
+      if (fullySaved) setTimeout(() => setSaveState('idle'), 2000);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Gagal menyimpan lokasi cuaca');
-      setSaveState('idle');
+      setSaveState('error');
     }
   };
 
@@ -432,7 +458,7 @@ export function WeatherPage({ locationCode, settings, updateSettings }: WeatherP
 
           <div role="status" className="flex flex-col gap-3 rounded-xl border border-green-100 bg-green-50 p-4 text-sm text-green-900 dark:border-emerald-400/50 dark:bg-emerald-950/80 dark:text-emerald-50 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="font-semibold">Lokasi yang disimpan</p>
+              <p className="font-semibold">Lokasi pilihan</p>
               <p className="mt-1 text-green-800 dark:text-emerald-100">{selectedLabel}</p>
             </div>
             <button
@@ -445,6 +471,11 @@ export function WeatherPage({ locationCode, settings, updateSettings }: WeatherP
               {saveState === 'saving' ? 'Menyimpan...' : 'Simpan Lokasi'}
             </button>
           </div>
+          {saveState === 'saved' ? (
+            <p role="status" className="text-sm text-green-700 dark:text-green-300">
+              Database tersimpan; publish MQTT settings_sync dan schedule_set berhasil.
+            </p>
+          ) : null}
           {saveError ? (
             <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-400/50 dark:bg-rose-950/80 dark:text-rose-50">{saveError}</div>
           ) : null}

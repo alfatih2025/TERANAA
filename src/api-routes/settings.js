@@ -250,11 +250,21 @@ export default async function handler(req, res) {
         console.warn(`[api/settings] Retrying without unavailable settings column "${missingColumn}"`);
       }
 
-      await supabase.from('activity_logs').insert({
-        type: 'settings',
-        message: 'Settings updated',
-        details: updates,
-      }).catch(() => {});
+      try {
+        const { error: activityLogError } = await supabase.from('activity_logs').insert({
+          type: 'settings',
+          message: 'Settings updated',
+          details: updates,
+        });
+        if (activityLogError) {
+          console.warn('[api/settings] Settings saved but activity log insert failed:', activityLogError.message);
+        }
+      } catch (activityLogError) {
+        console.warn(
+          '[api/settings] Settings saved but activity log insert failed:',
+          activityLogError instanceof Error ? activityLogError.message : 'Unknown error',
+        );
+      }
 
       return res.status(200).json({
         ...normalizeSettings({ ...payload, ...(data || {}) }),

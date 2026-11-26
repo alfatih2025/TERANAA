@@ -212,23 +212,42 @@ export default async function handler(req, res) {
       }
 
       // Update status log terbaru ke Supabase berdasarkan hasil kirim MQTT
-      await supabase
-        .from('control_logs')
-        .update({ status: currentStatus })
-        .eq('id', row.id)
-        .catch(() => {});
+      try {
+        const { error: statusUpdateError } = await supabase
+          .from('control_logs')
+          .update({ status: currentStatus })
+          .eq('id', row.id);
+        if (statusUpdateError) {
+          console.warn('[api/control] MQTT result recorded, but control log status update failed:', statusUpdateError.message);
+        }
+      } catch (statusUpdateError) {
+        console.warn(
+          '[api/control] MQTT result recorded, but control log status update failed:',
+          statusUpdateError instanceof Error ? statusUpdateError.message : 'Unknown error',
+        );
+      }
 
-      await supabase.from('activity_logs').insert({
-        type: 'control',
-        message: `Command ${action} is ${currentStatus} for ${device}`,
-        details: { 
-          action, 
-          device, 
-          duration, 
-          command_id: row.id,
-          mqtt_error: mqttErrorLog || undefined
-        },
-      }).catch(() => {});
+      try {
+        const { error: activityLogError } = await supabase.from('activity_logs').insert({
+          type: 'control',
+          message: `Command ${action} is ${currentStatus} for ${device}`,
+          details: {
+            action,
+            device,
+            duration,
+            command_id: row.id,
+            mqtt_error: mqttErrorLog || undefined,
+          },
+        });
+        if (activityLogError) {
+          console.warn('[api/control] Command completed, but activity log insert failed:', activityLogError.message);
+        }
+      } catch (activityLogError) {
+        console.warn(
+          '[api/control] Command completed, but activity log insert failed:',
+          activityLogError instanceof Error ? activityLogError.message : 'Unknown error',
+        );
+      }
 
       return res.status(200).json({
         success: currentStatus === 'sent',

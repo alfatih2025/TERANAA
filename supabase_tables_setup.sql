@@ -104,6 +104,18 @@ CREATE TABLE IF NOT EXISTS settings (
     -- User Info
     user_name VARCHAR(100) DEFAULT 'Petani Cerdas',
     user_email VARCHAR(100) DEFAULT 'petani@sprout.id',
+
+    -- AI Router Settings
+    ai_mode VARCHAR(20) DEFAULT 'default',
+    ai_primary_provider VARCHAR(20) DEFAULT 'gemini',
+    ai_primary_model VARCHAR(100) DEFAULT 'gemini-3.5-flash-lite',
+    ai_fallback_1_provider VARCHAR(20) DEFAULT 'openrouter',
+    ai_fallback_1_model VARCHAR(100) DEFAULT 'qwen/qwen-2.5-72b-instruct',
+    ai_fallback_2_provider VARCHAR(20) DEFAULT 'groq',
+    ai_fallback_2_model VARCHAR(100) DEFAULT 'openai/gpt-oss-120b',
+    ai_strategy VARCHAR(20) DEFAULT 'priority',
+    ai_temperature NUMERIC(3, 2) DEFAULT 0.40,
+    ai_max_tokens INT DEFAULT 600,
     
     -- Timestamps
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),

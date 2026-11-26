@@ -292,23 +292,23 @@ function setSensorSnapshot(next: SensorDelta, sourceTopic: string, force = false
   if (nodeId != null) {
     const prevNode = sensorSnapshotByNode.get(nodeId) ?? { ...emptySensorSnapshot, node_id: nodeId };
     
-    // Gabungkan data: pertahankan nilai sebelumnya jika paket baru hanya mengirim sebagian sensor
+    // Gabungkan data: pertahankan nilai sebelumnya jika paket baru hanya mengirim sebagian sensor (field bernilai undefined)
     const mergedNode: MqttSensorSnapshot = {
       ...prevNode,
       node_id: nodeId,
-      device_id: next.device_id ?? prevNode.device_id,
-      temperature: next.temperature ?? prevNode.temperature,
-      humidity: next.humidity ?? prevNode.humidity,
-      soil_moisture: next.soil_moisture ?? prevNode.soil_moisture,
-      soil_temp: next.soil_temp ?? prevNode.soil_temp,
-      ph: next.ph ?? prevNode.ph,
-      flow_rate: next.flow_rate ?? prevNode.flow_rate,
-      total_water: next.total_water ?? prevNode.total_water,
-      session_water: next.session_water ?? prevNode.session_water,
-      valve_status: next.valve_status ?? prevNode.valve_status,
-      fwi: next.fwi ?? prevNode.fwi,
-      fwi_level: next.fwi_level ?? prevNode.fwi_level,
-      fwi_status: next.fwi_status ?? prevNode.fwi_status,
+      device_id: next.device_id !== undefined ? next.device_id : prevNode.device_id,
+      temperature: next.temperature !== undefined ? next.temperature : prevNode.temperature,
+      humidity: next.humidity !== undefined ? next.humidity : prevNode.humidity,
+      soil_moisture: next.soil_moisture !== undefined ? next.soil_moisture : prevNode.soil_moisture,
+      soil_temp: next.soil_temp !== undefined ? next.soil_temp : prevNode.soil_temp,
+      ph: next.ph !== undefined ? next.ph : prevNode.ph,
+      flow_rate: next.flow_rate !== undefined ? next.flow_rate : prevNode.flow_rate,
+      total_water: next.total_water !== undefined ? next.total_water : prevNode.total_water,
+      session_water: next.session_water !== undefined ? next.session_water : prevNode.session_water,
+      valve_status: next.valve_status !== undefined ? next.valve_status : prevNode.valve_status,
+      fwi: next.fwi !== undefined ? next.fwi : prevNode.fwi,
+      fwi_level: next.fwi_level !== undefined ? next.fwi_level : prevNode.fwi_level,
+      fwi_status: next.fwi_status !== undefined ? next.fwi_status : prevNode.fwi_status,
       updatedAt: now,
       sourceTopic,
     };
@@ -397,16 +397,16 @@ async function persistSensorDataToApi(payload: string, parsed: SensorDelta) {
   const normalizedObj: Record<string, unknown> = {
     node_id: nodeId,
   };
-  if (parsed.temperature != null) normalizedObj.temperature = parsed.temperature;
-  if (parsed.humidity != null) normalizedObj.humidity = parsed.humidity;
-  if (parsed.soil_moisture != null) normalizedObj.soil_moisture = parsed.soil_moisture;
-  if (parsed.soil_temp != null) normalizedObj.soil_temp = parsed.soil_temp;
-  if (parsed.ph != null) normalizedObj.ph = parsed.ph;
-  if (parsed.flow_rate != null) normalizedObj.flow_rate = parsed.flow_rate;
-  if (parsed.total_water != null) normalizedObj.total_water = parsed.total_water;
-  if (parsed.session_water != null) normalizedObj.session_water = parsed.session_water;
-  if (parsed.valve_status != null) normalizedObj.valve_status = parsed.valve_status;
-  if (parsed.fwi != null) normalizedObj.score = parsed.fwi;
+  if (parsed.temperature !== undefined) normalizedObj.temperature = parsed.temperature;
+  if (parsed.humidity !== undefined) normalizedObj.humidity = parsed.humidity;
+  if (parsed.soil_moisture !== undefined) normalizedObj.soil_moisture = parsed.soil_moisture;
+  if (parsed.soil_temp !== undefined) normalizedObj.soil_temp = parsed.soil_temp;
+  if (parsed.ph !== undefined) normalizedObj.ph = parsed.ph;
+  if (parsed.flow_rate !== undefined) normalizedObj.flow_rate = parsed.flow_rate;
+  if (parsed.total_water !== undefined) normalizedObj.total_water = parsed.total_water;
+  if (parsed.session_water !== undefined) normalizedObj.session_water = parsed.session_water;
+  if (parsed.valve_status !== undefined) normalizedObj.valve_status = parsed.valve_status;
+  if (parsed.fwi !== undefined) normalizedObj.score = parsed.fwi;
   const normalized = JSON.stringify(normalizedObj);
 
   // Cache ke localStorage browser per node agar data terakhir selalu tersimpan & tampil
@@ -720,23 +720,23 @@ function normalizeJsonSensorPayload(payload: string): SensorDelta | null {
     return {
       device_id: typeof obj.device_id === 'string' ? obj.device_id : (nodeIdParsed === 0 || flowRate != null || phVal != null ? 'ESP32_Gateway' : undefined),
       node_id: nodeIdParsed ?? (flowRate != null || phVal != null ? 0 : null),
-      temperature: parseNumeric(obj.temperature),
-      humidity: parseNumeric(obj.humidity),
-      soil_moisture: parseNumeric(obj.soil_moisture),
-      soil_temp: parseNumeric(obj.soil_temp ?? obj.battery),
-      fwi: parseNumeric(obj.fwi ?? obj.fwi_score),
-      fwi_level: parseNumeric(obj.fwi_level),
+      temperature: 'temperature' in obj ? parseNumeric(obj.temperature) : undefined,
+      humidity: 'humidity' in obj ? parseNumeric(obj.humidity) : undefined,
+      soil_moisture: ('soil_moisture' in obj) ? parseNumeric(obj.soil_moisture) : (('soil' in obj) ? parseNumeric(obj.soil) : undefined),
+      soil_temp: ('soil_temp' in obj) ? parseNumeric(obj.soil_temp) : (('battery' in obj && nodeIdParsed === 3) ? parseNumeric(obj.battery) : undefined),
+      fwi: ('fwi' in obj) ? parseNumeric(obj.fwi) : (('fwi_score' in obj) ? parseNumeric(obj.fwi_score) : undefined),
+      fwi_level: 'fwi_level' in obj ? parseNumeric(obj.fwi_level) : undefined,
       fwi_status: typeof obj.fwi_status === 'string' ? obj.fwi_status : undefined,
-      ph: phVal,
-      flow_rate: flowRate,
-      total_water: totalWater,
-      session_water: sessionWater,
+      ph: 'ph' in obj ? phVal : undefined,
+      flow_rate: 'flow_rate' in obj ? flowRate : undefined,
+      total_water: ('total_water' in obj || 'total_liters' in obj) ? totalWater : undefined,
+      session_water: ('session_water' in obj || 'session_liters' in obj) ? sessionWater : undefined,
       valve_status: typeof obj.active_valve === 'string' ? obj.active_valve : (typeof obj.valve_status === 'string' ? obj.valve_status : undefined),
-      ffmc: parseNumeric(obj.ffmc),
-      dmc: parseNumeric(obj.dmc),
-      dc: parseNumeric(obj.dc),
-      isi: parseNumeric(obj.isi),
-      bui: parseNumeric(obj.bui),
+      ffmc: 'ffmc' in obj ? parseNumeric(obj.ffmc) : undefined,
+      dmc: 'dmc' in obj ? parseNumeric(obj.dmc) : undefined,
+      dc: 'dc' in obj ? parseNumeric(obj.dc) : undefined,
+      isi: 'isi' in obj ? parseNumeric(obj.isi) : undefined,
+      bui: 'bui' in obj ? parseNumeric(obj.bui) : undefined,
     };
   } catch {
     return null;

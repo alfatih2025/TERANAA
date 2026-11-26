@@ -203,6 +203,7 @@ function resolveControlCommand(action: string, duration?: number, data?: Record<
           soil_threshold_high: Number(data?.soil_threshold_high ?? 0),
           soil_threshold_critical: Number(data?.soil_threshold_critical ?? 0),
           tk: Number(data?.soil_threshold_critical ?? 0),
+          fertigation_interval: Number(data?.fertigation_interval ?? 2),
           auto_report: Boolean(data?.auto_report ?? true),
           report_time: String(data?.report_time ?? '08:00').trim(),
           user_name: String(data?.user_name ?? '').trim(),

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect, useMemo, useRef } from 'react';
+import { lazy, Suspense, useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Sidebar, type PageId } from './components/Sidebar';
 import { Header } from './components/Header';
@@ -12,7 +12,7 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage').then(({ SettingsP
 const AiRouterPage = lazy(() => import('./pages/AiRouterPage').then(({ AiRouterPage }) => ({ default: AiRouterPage })));
 const AboutPage = lazy(() => import('./pages/AboutPage').then(({ AboutPage }) => ({ default: AboutPage })));
 import { useMultiNodeSensorData } from './hooks/useMultiNodeSensorData';
-import { getNodeSensorSnapshot } from './services/mqtt';
+import { getNodeSensorSnapshot, publishMqtt } from './services/mqtt';
 
 import { useWeather } from './hooks/useWeather';
 import { useSettings } from './hooks/useSettings';
@@ -20,6 +20,7 @@ import { useAlerts } from './hooks/useAlerts';
 import { useMqttStatus } from './hooks/useMqttStatus';
 import { getPlantHealthSummary } from './lib/plantPhase';
 import { recordActivity } from './lib/activityLog';
+import { buildBmkgWeatherMqttPayload, type BmkgWeatherMqttPayload } from './lib/bmkgMqttPayload';
 const LoginPage = lazy(() => import('./pages/LoginPage').then(({ LoginPage }) => ({ default: LoginPage })));
 import { useAuth } from './hooks/useAuthContext';
 
@@ -40,7 +41,14 @@ function PageLoadingFallback() {
   );
 }
 
-const RAIN_PUBLISH_INTERVAL_MS = 3 * 60 * 60 * 1000;
+const BMKG_WEATHER_PUBLISH_INTERVAL_MS = 3 * 60 * 60 * 1000;
+const BMKG_WEATHER_TOPIC = 'sproutai/weather/bmkg';
+
+function takePendingBmkgPayload(ref: { current: BmkgWeatherMqttPayload | null }) {
+  const pending = ref.current;
+  ref.current = null;
+  return pending;
+}
 
 function resolvePageFromPath(pathname: string) {
   const normalized = pathname.replace(/^\/+|\/+$/g, '').toLowerCase();
@@ -75,6 +83,69 @@ function App() {
 
   const mqttStatus = useMqttStatus();
   const lastAlertSignatureRef = useRef<string>('');
+  const liveBmkgPayload = useMemo(
+    () => buildBmkgWeatherMqttPayload(weatherData, settings?.location),
+    [weatherData, settings?.location],
+  );
+  const latestBmkgPayloadRef = useRef<BmkgWeatherMqttPayload | null>(null);
+  const mqttConnectedRef = useRef(mqttStatus.mqttConnected);
+  const wasMqttConnectedRef = useRef(false);
+  const lastBmkgPublishRef = useRef<{ locationCode: string | null; publishedAt: number }>({
+    locationCode: null,
+    publishedAt: 0,
+  });
+  const publishingLocationRef = useRef<string | null>(null);
+  const bmkgPublishInFlightRef = useRef(false);
+  const pendingBmkgPayloadRef = useRef<BmkgWeatherMqttPayload | null>(null);
+
+  const publishBmkgWeather = useCallback(async (payload: BmkgWeatherMqttPayload, force = false) => {
+    if (!mqttConnectedRef.current) return;
+
+    const lastPublished = lastBmkgPublishRef.current;
+    if (
+      !force &&
+      lastPublished.locationCode === payload.location_code &&
+      Date.now() - lastPublished.publishedAt < BMKG_WEATHER_PUBLISH_INTERVAL_MS
+    ) {
+      return;
+    }
+
+    if (bmkgPublishInFlightRef.current) {
+      if (force || payload.location_code !== publishingLocationRef.current) {
+        pendingBmkgPayloadRef.current = payload;
+      }
+      return;
+    }
+
+    bmkgPublishInFlightRef.current = true;
+    pendingBmkgPayloadRef.current = null;
+    let nextPayload: BmkgWeatherMqttPayload | null = payload;
+    try {
+      while (nextPayload && mqttConnectedRef.current) {
+        const attemptedPayload: BmkgWeatherMqttPayload = nextPayload;
+        publishingLocationRef.current = attemptedPayload.location_code;
+        try {
+          await publishMqtt(BMKG_WEATHER_TOPIC, JSON.stringify(attemptedPayload), { qos: 1, retain: true });
+          lastBmkgPublishRef.current = {
+            locationCode: attemptedPayload.location_code,
+            publishedAt: Date.now(),
+          };
+          console.info('[BMKG] live weather retained for ESP32', attemptedPayload.location_code);
+        } catch (error) {
+          console.error('[BMKG] failed to publish live weather to ESP32:', error);
+          const pending = takePendingBmkgPayload(pendingBmkgPayloadRef);
+          nextPayload = pending && mqttConnectedRef.current ? pending : null;
+          continue;
+        }
+
+        const pending = takePendingBmkgPayload(pendingBmkgPayloadRef);
+        nextPayload = pending?.location_code !== attemptedPayload.location_code ? pending : null;
+      }
+    } finally {
+      publishingLocationRef.current = null;
+      bmkgPublishInFlightRef.current = false;
+    }
+  }, []);
 
   useEffect(() => {
     import('./services/mqtt')
@@ -83,6 +154,38 @@ function App() {
         console.error('Gagal memulai koneksi MQTT:', error);
       });
   }, []);
+
+  useEffect(() => {
+    latestBmkgPayloadRef.current = liveBmkgPayload;
+  }, [liveBmkgPayload]);
+
+  useEffect(() => {
+    mqttConnectedRef.current = mqttStatus.mqttConnected;
+  }, [mqttStatus.mqttConnected]);
+
+  useEffect(() => {
+    const reconnected = mqttStatus.mqttConnected && !wasMqttConnectedRef.current;
+    wasMqttConnectedRef.current = mqttStatus.mqttConnected;
+    if (!mqttStatus.mqttConnected || !liveBmkgPayload) return;
+
+    const last = lastBmkgPublishRef.current;
+    const locationChanged = last.locationCode !== liveBmkgPayload.location_code;
+    const intervalElapsed = Date.now() - last.publishedAt >= BMKG_WEATHER_PUBLISH_INTERVAL_MS;
+    if (reconnected || locationChanged || intervalElapsed) {
+      void publishBmkgWeather(liveBmkgPayload, true);
+    }
+  }, [liveBmkgPayload, mqttStatus.mqttConnected, publishBmkgWeather]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const intervalId = window.setInterval(() => {
+      const payload = latestBmkgPayloadRef.current;
+      if (payload && mqttConnectedRef.current) {
+        void publishBmkgWeather(payload, true);
+      }
+    }, BMKG_WEATHER_PUBLISH_INTERVAL_MS);
+    return () => window.clearInterval(intervalId);
+  }, [publishBmkgWeather]);
 
   useEffect(() => {
     const pageName =
@@ -222,7 +325,7 @@ function App() {
   // ============================================================
   const lastRainPublishRef = useRef<number>(0);
   const lastRainValueRef = useRef<number | null>(null);
-  const rainChance = weatherData?.current?.rain_chance;
+  const rainChance = weatherData?.source === 'bmkg' ? weatherData.current.rain_chance : undefined;
 
   useEffect(() => {
     if (rainChance == null) return;
@@ -235,7 +338,7 @@ function App() {
     const shouldPublish =
       lastPublish === 0 ||
       (rainChance !== lastValue) ||
-      (now - lastPublish >= RAIN_PUBLISH_INTERVAL_MS);
+      (now - lastPublish >= BMKG_WEATHER_PUBLISH_INTERVAL_MS);
 
     if (shouldPublish) {
       lastRainPublishRef.current = now;

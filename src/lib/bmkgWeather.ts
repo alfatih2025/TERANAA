@@ -154,6 +154,7 @@ export function transformBmkgWeather(data: unknown, fallbackLocation = DEFAULT_W
     location: formatLocation(root?.lokasi, fallbackLocation),
     source: 'bmkg',
     fallback_reason: undefined,
+    fetched_at: new Date().toISOString(),
     current: {
       temperature: toNumber(currentForecast.t, DEFAULT_WEATHER.current.temperature),
       humidity: toNumber(currentForecast.hu, DEFAULT_WEATHER.current.humidity),

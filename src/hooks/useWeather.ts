@@ -7,6 +7,7 @@ export interface WeatherData {
   location_code?: string;
   source: 'bmkg' | 'fallback';
   fallback_reason?: string;
+  fetched_at?: string;
   current: {
     temperature: number;
     humidity: number;
@@ -67,6 +68,7 @@ function readWeatherCache(locationCode: string) {
 
 function normalizeWeatherData(locationCode: string, data: unknown, fallbackLabel: string, pathLabel: string): WeatherData {
   const safe = data && typeof data === 'object' ? data as Partial<WeatherData> : null;
+  const source = safe?.source === 'bmkg' ? 'bmkg' : 'fallback';
   const isKnownLocation = pathLabel !== locationCode && !fallbackLabel.startsWith('Lokasi BMKG');
   const bestLocation = isKnownLocation ? pathLabel : (safe?.location ?? fallbackLabel);
   const current = safe?.current ?? {
@@ -93,12 +95,15 @@ function normalizeWeatherData(locationCode: string, data: unknown, fallbackLabel
   return {
     location: String(bestLocation),
     location_code: locationCode,
-    source: safe?.source === 'bmkg' ? 'bmkg' : 'fallback',
+    source,
     fallback_reason: typeof safe?.fallback_reason === 'string'
       ? safe.fallback_reason
-      : safe?.source === 'bmkg'
+      : source === 'bmkg'
         ? undefined
         : 'Data cuaca BMKG real-time tidak tersedia',
+    fetched_at: typeof safe?.fetched_at === 'string' && Number.isFinite(Date.parse(safe.fetched_at))
+      ? safe.fetched_at
+      : undefined,
     current: {
       temperature: Number(current.temperature) || 0,
       humidity: Number(current.humidity) || 0,

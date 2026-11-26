@@ -118,6 +118,7 @@ function createFallbackWeather(locationCode, location, reason) {
     forecast,
     source: 'fallback',
     fallback_reason: reason,
+    fetched_at: new Date().toISOString(),
     _fallback: true,
     _reason: reason,
   };
@@ -244,6 +245,7 @@ function transformBmkgWeather(data, fallbackLocation = DEFAULT_WEATHER.location)
     location_code: resolveLocationCode(root?.lokasi?.adm4 || root?.location_code || root?.adm4 || DEFAULT_LOCATION_CODE),
     location: formatLocation(root?.lokasi || root?.lokasi_terpilih, fallbackLocation),
     source: 'bmkg',
+    fetched_at: new Date().toISOString(),
     current: {
       temperature: toNumber(currentForecast.t, DEFAULT_WEATHER.current.temperature),
       humidity: toNumber(currentForecast.hu, DEFAULT_WEATHER.current.humidity),

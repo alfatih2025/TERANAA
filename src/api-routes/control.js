@@ -18,15 +18,6 @@ const COMMAND_MAP = {
   irrigation_off: { topic: 'sproutai/irigasi/cmd', payload: 'OFF' },
   fertigation_on: { topic: 'sproutai/fertigasi/cmd', payload: 'ON' },
   fertigation_off: { topic: 'sproutai/fertigasi/cmd', payload: 'OFF' },
-  pump_10s: (duration, commandId) => ({
-    topic: 'sproutai/ai/action',
-    payload: JSON.stringify({
-      command_id: commandId,
-      action: 'pump_10s',
-      pump: 'ON',
-      duration: Number(duration || 10),
-    }),
-  }),
   led_on: { topic: 'sproutai/lampu/cmd', payload: 'ON' },
   led_off: { topic: 'sproutai/lampu/cmd', payload: 'OFF' },
   mode_auto: { topic: 'sproutai/mode/cmd', payload: 'AUTO' },

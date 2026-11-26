@@ -133,14 +133,6 @@ function resolveControlCommand(action: string, duration?: number, data?: Record<
         payload: 'OFF',
         acknowledgement: { topic: TOPIC_ACTUATOR_STATUS, matches: actuatorMatches('fertigasi', false) },
       };
-    case 'pump_10s':
-      return {
-        topic: 'sproutai/ai/action',
-        payload: JSON.stringify({
-          pump: 'ON',
-          duration: duration ?? 10,
-        }),
-      };
     // Kasus led_on dan led_off dihapus karena LED dikontrol ESP32 secara hardware
     case 'mode_auto':
       return {

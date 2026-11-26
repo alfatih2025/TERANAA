@@ -16,6 +16,9 @@ const TOPIC_POMPA_CMD = 'sproutai/pompa/cmd';
 const TOPIC_POMPA_STATUS = 'sproutai/pompa/status';
 const TOPIC_LAMPU_CMD = 'sproutai/lampu/cmd';
 const TOPIC_LAMPU_STATUS = 'sproutai/lampu/status';
+const TOPIC_LAMPU_SYSTEM_STATUS = 'sproutai/lampu/system/status';
+const TOPIC_LAMPU_MODE_STATUS = 'sproutai/lampu/mode/status';
+const TOPIC_LAMPU_ONLINE_STATUS = 'sproutai/lampu/online/status';
 const TOPIC_MODE_CMD = 'sproutai/mode/cmd';
 const TOPIC_MODE_STATUS = 'sproutai/mode/status';
 const TOPIC_WIFI_CMD = 'sproutai/wifi/cmd';
@@ -54,6 +57,9 @@ const SUBSCRIBE_TOPICS = [
   TOPIC_SCORE,
   TOPIC_POMPA_STATUS,
   TOPIC_LAMPU_STATUS,
+  TOPIC_LAMPU_SYSTEM_STATUS,
+  TOPIC_LAMPU_MODE_STATUS,
+  TOPIC_LAMPU_ONLINE_STATUS,
   TOPIC_MODE_STATUS,
   TOPIC_WIFI_STATUS,
   TOPIC_SETTINGS_CMD,
@@ -119,6 +125,20 @@ export interface MqttActuatorSnapshot {
   currentLiters?: number | null;
   totalLiters?: number | null;
   targetLiters?: number | null;
+  lampuMode?: boolean | null;
+  lampuSystem?: boolean | null;
+  lampuOnline?: boolean | null;
+  updatedAt: string | null;
+  sourceTopic: string | null;
+}
+
+export interface MqttScheduleSnapshot {
+  schedule_enabled: boolean;
+  watering_time: string;
+  watering_duration: number;
+  time_valid: boolean;
+  current_time: string;
+  last_watered: string;
   updatedAt: string | null;
   sourceTopic: string | null;
 }
@@ -142,6 +162,7 @@ export interface MqttStatusSnapshot {
   subscribedTopics: string[];
   sensorSnapshot: MqttSensorSnapshot | null;
   actuatorSnapshot: MqttActuatorSnapshot | null;
+  scheduleSnapshot?: MqttScheduleSnapshot | null;
 }
 
 type SensorDelta = Partial<Omit<MqttSensorSnapshot, 'updatedAt' | 'sourceTopic'>>;
@@ -204,6 +225,27 @@ function getInitialSavedActuator(): MqttActuatorSnapshot {
   return fallback;
 }
 
+function getInitialSavedSchedule(): MqttScheduleSnapshot {
+  const fallback: MqttScheduleSnapshot = {
+    schedule_enabled: true,
+    watering_time: '06:00',
+    watering_duration: 10,
+    time_valid: false,
+    current_time: '--:--',
+    last_watered: 'Belum ada',
+    updatedAt: null,
+    sourceTopic: null,
+  };
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const saved = localStorage.getItem('teranova_gateway_schedule');
+    if (saved) {
+      return { ...fallback, ...JSON.parse(saved) };
+    }
+  } catch {}
+  return fallback;
+}
+
 const defaultSnapshot = (): MqttStatusSnapshot => ({
   brokerUrl: BROKER_URL,
   browserOnline: typeof navigator === 'undefined' ? true : navigator.onLine,
@@ -223,11 +265,13 @@ const defaultSnapshot = (): MqttStatusSnapshot => ({
   subscribedTopics: SUBSCRIBE_TOPICS,
   sensorSnapshot: null,
   actuatorSnapshot: getInitialSavedActuator(),
+  scheduleSnapshot: getInitialSavedSchedule(),
 });
 
 let snapshot: MqttStatusSnapshot = defaultSnapshot();
 let sensorSnapshot: MqttSensorSnapshot | null = null;
 let actuatorSnapshot: MqttActuatorSnapshot | null = getInitialSavedActuator();
+let scheduleSnapshot: MqttScheduleSnapshot = getInitialSavedSchedule();
 let sensorSnapshotByNode: Map<number, MqttSensorSnapshot> = new Map();
 let sensorHistory: MqttSensorSnapshot[] = [];
 let reconnectTimer: number | null = null;
@@ -628,6 +672,9 @@ function parseActuatorStatusPayload(payload: string): Partial<Omit<MqttActuatorS
   const currentLiters = parseNumeric(parsed.current_liters ?? parsed.session_liters ?? parsed.session_water);
   const totalLiters = parseNumeric(parsed.total_liters ?? parsed.total_water);
   const targetLiters = parseNumeric(parsed.target_liters ?? parsed.target_water);
+  const lampuMode = parseBoolean(parsed.lampu_mode);
+  const lampuSystem = parseBoolean(parsed.lampu_sistem ?? parsed.lampu_system ?? parsed.lampu_mode);
+  const lampuOnline = parseBoolean(parsed.lampu_online);
 
   if (
     irigasi === undefined &&
@@ -638,7 +685,10 @@ function parseActuatorStatusPayload(payload: string): Partial<Omit<MqttActuatorS
     ph === null &&
     flowRate === null &&
     currentLiters === null &&
-    totalLiters === null
+    totalLiters === null &&
+    lampuMode === undefined &&
+    lampuSystem === undefined &&
+    lampuOnline === undefined
   ) {
     return null;
   }
@@ -654,6 +704,9 @@ function parseActuatorStatusPayload(payload: string): Partial<Omit<MqttActuatorS
     currentLiters: currentLiters ?? undefined,
     totalLiters: totalLiters ?? undefined,
     targetLiters: targetLiters ?? undefined,
+    lampuMode,
+    lampuSystem,
+    lampuOnline,
   };
 }
 
@@ -672,6 +725,9 @@ function setActuatorSnapshot(
     currentLiters: null,
     totalLiters: null,
     targetLiters: null,
+    lampuMode: null,
+    lampuSystem: null,
+    lampuOnline: null,
     updatedAt: null,
     sourceTopic: null,
   };
@@ -688,6 +744,9 @@ function setActuatorSnapshot(
     currentLiters: next.currentLiters !== undefined ? next.currentLiters : previous.currentLiters,
     totalLiters: next.totalLiters !== undefined ? next.totalLiters : previous.totalLiters,
     targetLiters: next.targetLiters !== undefined ? next.targetLiters : previous.targetLiters,
+    lampuMode: next.lampuMode !== undefined ? next.lampuMode : (next.mode ? next.mode === 'auto' : previous.lampuMode),
+    lampuSystem: next.lampuSystem !== undefined ? next.lampuSystem : (next.lampuMode !== undefined ? next.lampuMode : previous.lampuSystem),
+    lampuOnline: next.lampuOnline !== undefined ? next.lampuOnline : previous.lampuOnline,
     updatedAt: new Date().toISOString(),
     sourceTopic,
   };
@@ -704,6 +763,34 @@ function setActuatorSnapshot(
   }
 
   setSnapshot({ actuatorSnapshot });
+}
+
+function setScheduleSnapshot(
+  next: Partial<Omit<MqttScheduleSnapshot, 'updatedAt' | 'sourceTopic'>>,
+  sourceTopic: string,
+) {
+  const previous = scheduleSnapshot;
+  scheduleSnapshot = {
+    ...previous,
+    schedule_enabled: next.schedule_enabled !== undefined ? next.schedule_enabled : previous.schedule_enabled,
+    watering_time: next.watering_time !== undefined ? next.watering_time : previous.watering_time,
+    watering_duration: next.watering_duration !== undefined ? next.watering_duration : previous.watering_duration,
+    time_valid: next.time_valid !== undefined ? next.time_valid : previous.time_valid,
+    current_time: next.current_time !== undefined ? next.current_time : previous.current_time,
+    last_watered: next.last_watered !== undefined ? next.last_watered : previous.last_watered,
+    updatedAt: new Date().toISOString(),
+    sourceTopic,
+  };
+
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('teranova_gateway_schedule', JSON.stringify(scheduleSnapshot));
+    } catch {
+      // ignore
+    }
+  }
+
+  setSnapshot({ scheduleSnapshot });
 }
 
 function normalizeJsonSensorPayload(payload: string): SensorDelta | null {
@@ -858,6 +945,16 @@ function updateFromTopic(topic: string, payload: string) {
     return;
   }
 
+  if (topic === TOPIC_LAMPU_SYSTEM_STATUS || topic === TOPIC_LAMPU_MODE_STATUS) {
+    const isLampOn = parseBoolean(trimmed);
+    if (isLampOn !== undefined) setActuatorSnapshot({ lampuSystem: isLampOn, lampuMode: isLampOn }, topic);
+  }
+
+  if (topic === TOPIC_LAMPU_ONLINE_STATUS) {
+    const isLampOn = parseBoolean(trimmed);
+    if (isLampOn !== undefined) setActuatorSnapshot({ lampuOnline: isLampOn }, topic);
+  }
+
   if (
     topic === TOPIC_SENSOR_JSON ||
     topic === TOPIC_KARHUTLA_FWI ||
@@ -884,6 +981,31 @@ function updateFromTopic(topic: string, payload: string) {
     const parsed = parseMqttJsonPayload(trimmed);
     if (parsed) {
       applySettingsSnapshot(parsed, topic);
+    }
+  }
+
+  if (topic === TOPIC_SCHEDULE_STATUS || topic === TOPIC_SCHEDULE_CMD) {
+    const parsed = parseMqttJsonPayload(trimmed);
+    if (parsed) {
+      const schedEn = parseBoolean(parsed.schedule_enabled ?? parsed.watering_enabled ?? parsed.se);
+      const wt = typeof parsed.watering_time === 'string'
+        ? parsed.watering_time.trim()
+        : (typeof parsed.wt === 'string' ? parsed.wt.trim() : undefined);
+      const wd = parseNumeric(parsed.watering_duration ?? parsed.wd);
+      const tv = parseBoolean(parsed.time_valid);
+      const ct = typeof parsed.current_time === 'string' ? parsed.current_time : undefined;
+      const lw = typeof parsed.last_watered === 'string'
+        ? parsed.last_watered
+        : (typeof parsed.last_watered_time === 'string' ? parsed.last_watered_time : undefined);
+
+      setScheduleSnapshot({
+        schedule_enabled: schedEn ?? undefined,
+        watering_time: wt ?? undefined,
+        watering_duration: wd ?? undefined,
+        time_valid: tv ?? undefined,
+        current_time: ct ?? undefined,
+        last_watered: lw ?? undefined,
+      }, topic);
     }
   }
 
@@ -948,6 +1070,13 @@ async function connectOnce() {
     announceWebPresence('online').catch((error: unknown) => {
       console.error('[MQTT] gagal mengirim status web:', error);
     });
+
+    // Otomatis sinkronkan waktu browser ke ESP32 agar RTC tepat dan sinkron
+    try {
+      const epoch = Math.floor(Date.now() / 1000);
+      client?.publish('sproutai/time/cmd', JSON.stringify({ epoch }), { qos: 0 });
+    } catch {}
+
     setSnapshot({ webPublishedAt: new Date().toISOString() });
   });
 
@@ -1045,6 +1174,19 @@ export function getSensorSnapshot() {
 
 export function getNodeSensorSnapshot(nodeId: number): MqttSensorSnapshot | null {
   return sensorSnapshotByNode.get(nodeId) ?? null;
+}
+
+export function getScheduleSnapshot(): MqttScheduleSnapshot {
+  return scheduleSnapshot;
+}
+
+export async function syncBrowserTimeToEsp32(): Promise<void> {
+  try {
+    const epoch = Math.floor(Date.now() / 1000);
+    await publishMqtt('sproutai/time/cmd', JSON.stringify({ epoch }), { qos: 0 });
+  } catch (e) {
+    console.warn('[MQTT] Gagal mengirim sinkronisasi waktu browser:', e);
+  }
 }
 
 export function getSensorHistorySnapshot() {

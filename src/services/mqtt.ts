@@ -40,6 +40,8 @@ const TOPIC_KARHUTLA_FWI = 'sproutai/karhutla/fwi';
 const TOPIC_KARHUTLA_ALERT = 'sproutai/karhutla/alert';
 const TOPIC_FLOW = 'sproutai/sensor/flow';
 const TOPIC_ACTUATOR_STATUS = 'sproutai/actuator/status';
+const TOPIC_SIMULATION_COMMAND = 'sproutai/simulation/cmd';
+const TOPIC_SIMULATION_STATUS = 'sproutai/simulation/status';
 
 const SUBSCRIBE_TOPICS = [
   DEVICE_STATUS_TOPIC,
@@ -51,6 +53,7 @@ const SUBSCRIBE_TOPICS = [
   TOPIC_PH,
   TOPIC_FLOW,
   TOPIC_ACTUATOR_STATUS,
+  TOPIC_SIMULATION_STATUS,
   TOPIC_SOIL,
   TOPIC_TEMP,
   TOPIC_HUMIDITY,
@@ -112,6 +115,7 @@ export interface MqttSensorSnapshot {
   bui?: number | null;
   updatedAt: string | null;
   sourceTopic: string | null;
+  simulation?: boolean;
 }
 
 export interface MqttActuatorSnapshot {
@@ -130,6 +134,23 @@ export interface MqttActuatorSnapshot {
   lampuOnline?: boolean | null;
   updatedAt: string | null;
   sourceTopic: string | null;
+}
+
+export interface MqttSimulationSnapshot {
+  requestId: string | null;
+  action: string | null;
+  state: string;
+  message: string;
+  armed: boolean;
+  mode: string | null;
+  irigasi: boolean | null;
+  fertigasi: boolean | null;
+  pompa: boolean | null;
+  activeValve: string | null;
+  flowRate: number | null;
+  currentLiters: number | null;
+  targetLiters: number | null;
+  updatedAt: string | null;
 }
 
 export interface MqttScheduleSnapshot {
@@ -162,6 +183,7 @@ export interface MqttStatusSnapshot {
   subscribedTopics: string[];
   sensorSnapshot: MqttSensorSnapshot | null;
   actuatorSnapshot: MqttActuatorSnapshot | null;
+  simulationSnapshot: MqttSimulationSnapshot | null;
   scheduleSnapshot?: MqttScheduleSnapshot | null;
 }
 
@@ -265,12 +287,14 @@ const defaultSnapshot = (): MqttStatusSnapshot => ({
   subscribedTopics: SUBSCRIBE_TOPICS,
   sensorSnapshot: null,
   actuatorSnapshot: getInitialSavedActuator(),
+  simulationSnapshot: null,
   scheduleSnapshot: getInitialSavedSchedule(),
 });
 
 let snapshot: MqttStatusSnapshot = defaultSnapshot();
 let sensorSnapshot: MqttSensorSnapshot | null = null;
 let actuatorSnapshot: MqttActuatorSnapshot | null = getInitialSavedActuator();
+let simulationSnapshot: MqttSimulationSnapshot | null = null;
 let scheduleSnapshot: MqttScheduleSnapshot = getInitialSavedSchedule();
 let sensorSnapshotByNode: Map<number, MqttSensorSnapshot> = new Map();
 let sensorHistory: MqttSensorSnapshot[] = [];
@@ -350,6 +374,7 @@ function setSensorSnapshot(next: SensorDelta, sourceTopic: string, force = false
       total_water: next.total_water !== undefined ? next.total_water : prevNode.total_water,
       session_water: next.session_water !== undefined ? next.session_water : prevNode.session_water,
       valve_status: next.valve_status !== undefined ? next.valve_status : prevNode.valve_status,
+      simulation: next.simulation !== undefined ? next.simulation : prevNode.simulation,
       fwi: next.fwi !== undefined ? next.fwi : prevNode.fwi,
       fwi_level: next.fwi_level !== undefined ? next.fwi_level : prevNode.fwi_level,
       fwi_status: next.fwi_status !== undefined ? next.fwi_status : prevNode.fwi_status,
@@ -364,7 +389,9 @@ function setSensorSnapshot(next: SensorDelta, sourceTopic: string, force = false
     sensorSnapshotByNode.set(nodeId, mergedNode);
 
     // Simpan ke Supabase (menggunakan mergedNode yang lengkap)
-    persistSensorDataToApi(JSON.stringify(mergedNode), mergedNode);
+    if (!mergedNode.simulation) {
+      persistSensorDataToApi(JSON.stringify(mergedNode), mergedNode);
+    }
 
     if (!force && prevKey === nextKey) {
       // Nilai sensor sama persis, lewati emit re-render
@@ -399,7 +426,7 @@ function setSensorSnapshot(next: SensorDelta, sourceTopic: string, force = false
 
 
 function dispatchSettingsEvent(detail: Record<string, unknown>) {
-  if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined' || detail.simulation) return;
   try {
     window.dispatchEvent(new CustomEvent(SETTINGS_EVENT, { detail }));
   } catch {
@@ -819,6 +846,7 @@ function normalizeJsonSensorPayload(payload: string): SensorDelta | null {
       total_water: ('total_water' in obj || 'total_liters' in obj) ? totalWater : undefined,
       session_water: ('session_water' in obj || 'session_liters' in obj) ? sessionWater : undefined,
       valve_status: typeof obj.active_valve === 'string' ? obj.active_valve : (typeof obj.valve_status === 'string' ? obj.valve_status : undefined),
+      simulation: obj.simulation === true,
       ffmc: 'ffmc' in obj ? parseNumeric(obj.ffmc) : undefined,
       dmc: 'dmc' in obj ? parseNumeric(obj.dmc) : undefined,
       dc: 'dc' in obj ? parseNumeric(obj.dc) : undefined,
@@ -859,6 +887,35 @@ function parseStatusValue(payload: string): boolean | null {
 function updateFromTopic(topic: string, payload: string) {
   const now = new Date().toISOString();
   const trimmed = payload.trim();
+
+  if (topic === TOPIC_SIMULATION_STATUS) {
+    const parsed = parseMqttJsonPayload(trimmed);
+    if (parsed) {
+      simulationSnapshot = {
+        requestId: typeof parsed.request_id === 'string' ? parsed.request_id : null,
+        action: typeof parsed.action === 'string' ? parsed.action : null,
+        state: typeof parsed.state === 'string' ? parsed.state : 'unknown',
+        message: typeof parsed.message === 'string' ? parsed.message : '',
+        armed: parseBoolean(parsed.armed) ?? false,
+        mode: typeof parsed.mode === 'string' ? parsed.mode : null,
+        irigasi: parseBoolean(parsed.irigasi) ?? null,
+        fertigasi: parseBoolean(parsed.fertigasi) ?? null,
+        pompa: parseBoolean(parsed.pompa) ?? null,
+        activeValve: typeof parsed.active_valve === 'string' ? parsed.active_valve : null,
+        flowRate: parseNumeric(parsed.flow_rate),
+        currentLiters: parseNumeric(parsed.current_liters),
+        targetLiters: parseNumeric(parsed.target_liters),
+        updatedAt: now,
+      };
+      setSnapshot({
+        simulationSnapshot,
+        lastTopic: topic,
+        lastPayload: payload,
+        lastMessageAt: now,
+      });
+    }
+    return;
+  }
 
   if (topic === DEVICE_STATUS_TOPIC) {
     const parsedStatus = parseStatusValue(trimmed);
@@ -926,15 +983,19 @@ function updateFromTopic(topic: string, payload: string) {
 
   if (topic === TOPIC_PH) {
     let phVal: number | null = null;
+    let simulated = false;
     try {
       const obj = JSON.parse(trimmed);
       if (typeof obj === 'number') phVal = obj;
-      else if (obj && typeof obj === 'object') phVal = parseNumeric(obj.ph);
+      else if (obj && typeof obj === 'object') {
+        phVal = parseNumeric(obj.ph);
+        simulated = obj.simulation === true;
+      }
     } catch {
       phVal = parseNumeric(trimmed);
     }
     if (phVal != null) {
-      setSensorSnapshot({ node_id: 0, ph: phVal, device_id: 'ESP32_Gateway' }, topic, false);
+      setSensorSnapshot({ node_id: 0, ph: phVal, device_id: 'ESP32_Gateway', simulation: simulated }, topic, false);
       setActuatorSnapshot({ ph: phVal }, topic);
       setSnapshot({
         lastTopic: topic,
@@ -1318,6 +1379,42 @@ export async function publishMqttWithAck(
       reject(err);
     });
   });
+}
+
+export type SimulationCommand =
+  | { action: 'arm'; confirm: 'ARM' }
+  | { action: 'disarm' }
+  | { action: 'sensor'; node: 1 | 2; soil: number; temp: number; rh: number; battery: number }
+  | { action: 'sensor'; node: 3; soil_temp: number; ambient_temp: number; ambient_hum: number; battery: number }
+  | { action: 'ph'; value: number }
+  | { action: 'rain'; value: number }
+  | { action: 'run' }
+  | { action: 'flow'; pulses: number; seconds: number };
+
+export async function sendSimulationCommand(command: SimulationCommand): Promise<MqttSimulationSnapshot> {
+  const requestId = `sim-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  const payload = JSON.stringify({ ...command, request_id: requestId });
+
+  await publishMqttWithAck(
+    TOPIC_SIMULATION_COMMAND,
+    payload,
+    TOPIC_SIMULATION_STATUS,
+    (_topic, message) => {
+      const response = parseMqttJsonPayload(message);
+      return response?.request_id === requestId && response.state !== 'queued';
+    },
+    15_000,
+    { retain: false, qos: 1 },
+  );
+
+  const response = simulationSnapshot;
+  if (!response || response.requestId !== requestId) {
+    throw new Error('ESP32 tidak mengirim status hasil simulasi.');
+  }
+  if (response.state === 'rejected') {
+    throw new Error(response.message || 'ESP32 menolak perintah simulasi.');
+  }
+  return response;
 }
 
 function applyLocalSnapshot(action: string, duration?: number, data?: Record<string, any>) {

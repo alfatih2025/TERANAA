@@ -6,6 +6,7 @@ const Dashboard = lazy(() => import('./pages/Dashboard').then(({ Dashboard }) =>
 const Monitoring = lazy(() => import('./pages/Monitoring').then(({ Monitoring }) => ({ default: Monitoring })));
 const ChatPage = lazy(() => import('./pages/ChatPage').then(({ ChatPage }) => ({ default: ChatPage })));
 const ControlPage = lazy(() => import('./pages/ControlPage').then(({ ControlPage }) => ({ default: ControlPage })));
+const SimulationPage = lazy(() => import('./pages/SimulationPage').then(({ SimulationPage }) => ({ default: SimulationPage })));
 const WeatherPage = lazy(() => import('./pages/WeatherPage').then(({ WeatherPage }) => ({ default: WeatherPage })));
 const LogsPage = lazy(() => import('./pages/LogsPage').then(({ LogsPage }) => ({ default: LogsPage })));
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then(({ SettingsPage }) => ({ default: SettingsPage })));
@@ -50,6 +51,7 @@ function resolvePageFromPath(pathname: string) {
     case 'monitoring':
     case 'chat':
     case 'control':
+    case 'simulation':
     case 'weather':
     case 'logs':
     case 'settings':
@@ -94,6 +96,8 @@ function App() {
             ? 'AI Chat'
             : activePage === 'control'
               ? 'Control'
+              : activePage === 'simulation'
+                ? 'Simulasi'
               : activePage === 'weather'
                 ? 'Cuaca'
                 : activePage === 'logs'
@@ -272,6 +276,8 @@ function App() {
         );
       case 'control':
         return <ControlPage />;
+      case 'simulation':
+        return <SimulationPage />;
       case 'weather':
         return <WeatherPage locationCode={settings?.location} settings={settings} updateSettings={updateSettings} />;
       case 'logs':

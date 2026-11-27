@@ -11,6 +11,7 @@ import {
   Zap,
   BookOpen,
   Network,
+  FlaskConical,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../hooks/useAuthContext';
@@ -23,6 +24,7 @@ export type PageId =
   | 'monitoring'
   | 'chat'
   | 'control'
+  | 'simulation'
   | 'weather'
   | 'logs'
   | 'settings'
@@ -40,6 +42,7 @@ const menuItems: { id: PageId; label: string; icon: typeof LayoutDashboard }[] =
   { id: 'monitoring', label: 'Monitoring', icon: Activity },
   { id: 'chat', label: 'AI Chat', icon: MessageSquare },
   { id: 'control', label: 'Kontrol', icon: Zap },
+  { id: 'simulation', label: 'Simulasi', icon: FlaskConical },
   { id: 'weather', label: 'Cuaca', icon: CloudSun },
   { id: 'logs', label: 'Log & Analitik', icon: FileText },
   { id: 'settings', label: 'Pengaturan', icon: Settings },

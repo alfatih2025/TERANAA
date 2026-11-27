@@ -45,7 +45,7 @@ interface DashboardProps {
 
 export function Dashboard({ sensorData, settings, weatherData }: DashboardProps) {
   const { node1, node2, node3, gateway, loading, isNode3Active } = useMultiNodeSensorData();
-  const { mqttConnected, actuatorSnapshot, espOnline, bootDiagnosticSnapshot } = useMqttStatus();
+  const { mqttConnected, actuatorSnapshot, espOnline, bootDiagnosticSnapshot, panicDumpSnapshot } = useMqttStatus();
 
   // Mode implementasi Karhutla: User memegang kendali penuh (tersimpan di localStorage)
   const [karhutlaEnabled, setKarhutlaEnabled] = useState<boolean>(() => {
@@ -190,6 +190,69 @@ export function Dashboard({ sensorData, settings, weatherData }: DashboardProps)
           <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">
             Menunggu diagnostik boot. Pastikan firmware terbaru sudah terpasang dan ESP32 berhasil tersambung ke MQTT.
           </p>
+        )}
+
+        {panicDumpSnapshot && (
+          <div className={`mt-4 rounded-xl border p-3 ${panicDumpSnapshot.available
+            ? 'border-rose-200 bg-rose-50 dark:border-rose-500/30 dark:bg-rose-500/10'
+            : 'border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10'}`}>
+            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+              {panicDumpSnapshot.available ? 'Ringkasan core dump terakhir' : 'Ringkasan core dump tidak tersedia'}
+            </h3>
+            {panicDumpSnapshot.available ? (
+              <>
+                <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                  Diperiksa setelah reset: {RESET_REASON_LABELS[panicDumpSnapshot.publishedAfterResetReason] ?? panicDumpSnapshot.publishedAfterResetReason}
+                </p>
+                <dl className="mt-2 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+                  <div>
+                    <dt className="text-xs text-slate-500 dark:text-slate-400">Task yang crash</dt>
+                    <dd className="font-semibold text-slate-900 dark:text-slate-100">{panicDumpSnapshot.task ?? 'Tidak diketahui'}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-slate-500 dark:text-slate-400">PC / exception cause</dt>
+                    <dd className="font-mono text-slate-900 dark:text-slate-100">
+                      {panicDumpSnapshot.pc ?? 'N/A'} / {panicDumpSnapshot.exceptionCause ?? 'N/A'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-slate-500 dark:text-slate-400">Alamat exception</dt>
+                    <dd className="font-mono text-slate-900 dark:text-slate-100">{panicDumpSnapshot.exceptionAddress ?? 'N/A'}</dd>
+                  </div>
+                  {panicDumpSnapshot.firmwareElfSha256 && (
+                    <div className="min-w-0">
+                      <dt className="text-xs text-slate-500 dark:text-slate-400">Hash ELF firmware</dt>
+                      <dd className="break-all font-mono text-xs text-slate-900 dark:text-slate-100">{panicDumpSnapshot.firmwareElfSha256}</dd>
+                    </div>
+                  )}
+                </dl>
+                <div className="mt-3">
+                  <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Backtrace{panicDumpSnapshot.backtraceCorrupted ? ' (ditandai korup)' : ''}
+                  </p>
+                  {panicDumpSnapshot.backtrace.length > 0 ? (
+                    <ol className="mt-1 grid grid-cols-1 gap-1 font-mono text-xs text-slate-800 dark:text-slate-200 sm:grid-cols-2">
+                      {panicDumpSnapshot.backtrace.map((address, index) => (
+                        <li key={`${index}-${address}`}>{index}: {address}</li>
+                      ))}
+                    </ol>
+                  ) : (
+                    <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">Backtrace tidak tersedia pada dump ini.</p>
+                  )}
+                </div>
+                <p className="mt-3 text-xs text-slate-600 dark:text-slate-400">
+                  Alamat backtrace perlu diterjemahkan dengan file ELF firmware yang hash-nya cocok. Ringkasan ini tidak mengirim isi RAM perangkat.
+                </p>
+              </>
+            ) : (
+              <p className="mt-1 text-sm text-amber-900 dark:text-amber-100">
+                {panicDumpSnapshot.publishedAfterResetReason === 'PANIC'
+                  ? 'Panic terdeteksi, tetapi core dump tidak ditemukan atau tidak valid'
+                  : `Core dump tidak ditemukan atau tidak dapat dibaca; reset terakhir ${RESET_REASON_LABELS[panicDumpSnapshot.publishedAfterResetReason] ?? panicDumpSnapshot.publishedAfterResetReason}`}
+                {' '}(error {panicDumpSnapshot.errorCode}).
+              </p>
+            )}
+          </div>
         )}
       </section>
 

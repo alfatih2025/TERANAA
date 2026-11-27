@@ -11,6 +11,7 @@ const MQTT_PASSWORD = (import.meta.env.VITE_MQTT_PASSWORD as string | undefined)
 const WEB_STATUS_TOPIC = 'sproutai/web/status';
 const DEVICE_STATUS_TOPIC = 'sproutai/esp32/status';
 const DEVICE_BOOT_TOPIC = 'sproutai/esp32/boot';
+const DEVICE_PANIC_TOPIC = 'sproutai/esp32/panic';
 const SYSTEM_STATUS_TOPIC = 'sproutai/system/status';
 
 const TOPIC_POMPA_CMD = 'sproutai/pompa/cmd';
@@ -47,6 +48,7 @@ const TOPIC_SIMULATION_STATUS = 'sproutai/simulation/status';
 const SUBSCRIBE_TOPICS = [
   DEVICE_STATUS_TOPIC,
   DEVICE_BOOT_TOPIC,
+  DEVICE_PANIC_TOPIC,
   SYSTEM_STATUS_TOPIC,
   TOPIC_SENSOR_JSON,
   TOPIC_SENSOR_NODE,
@@ -176,6 +178,7 @@ export interface MqttStatusSnapshot {
   espOnline: boolean;
   espLastSeenAt: string | null;
   bootDiagnosticSnapshot: MqttBootDiagnosticSnapshot | null;
+  panicDumpSnapshot: MqttPanicDumpSnapshot | null;
   systemOnline: boolean;
   systemLabel: string;
   systemDetail: string;
@@ -195,6 +198,20 @@ export interface MqttBootDiagnosticSnapshot {
   resetReason: string;
   resetReasonCode: number;
   uptimeMs: number;
+  updatedAt: string;
+}
+
+export interface MqttPanicDumpSnapshot {
+  available: boolean;
+  errorCode: number;
+  publishedAfterResetReason: string;
+  task: string | null;
+  pc: string | null;
+  exceptionCause: number | null;
+  exceptionAddress: string | null;
+  backtrace: string[];
+  backtraceCorrupted: boolean | null;
+  firmwareElfSha256: string | null;
   updatedAt: string;
 }
 
@@ -289,6 +306,7 @@ const defaultSnapshot = (): MqttStatusSnapshot => ({
   espOnline: false,
   espLastSeenAt: null,
   bootDiagnosticSnapshot: null,
+  panicDumpSnapshot: null,
   systemOnline: false,
   systemLabel: 'Sistem Offline',
   systemDetail: 'Koneksi belum tersedia',
@@ -308,6 +326,7 @@ let sensorSnapshot: MqttSensorSnapshot | null = null;
 let actuatorSnapshot: MqttActuatorSnapshot | null = getInitialSavedActuator();
 let simulationSnapshot: MqttSimulationSnapshot | null = null;
 let bootDiagnosticSnapshot: MqttBootDiagnosticSnapshot | null = null;
+let panicDumpSnapshot: MqttPanicDumpSnapshot | null = null;
 let scheduleSnapshot: MqttScheduleSnapshot = getInitialSavedSchedule();
 let sensorSnapshotByNode: Map<number, MqttSensorSnapshot> = new Map();
 let sensorHistory: MqttSensorSnapshot[] = [];
@@ -931,6 +950,47 @@ function updateFromTopic(topic: string, payload: string) {
     };
     setSnapshot({
       bootDiagnosticSnapshot,
+      lastTopic: topic,
+      lastPayload: payload,
+      lastMessageAt: now,
+    });
+    return;
+  }
+
+  if (topic === DEVICE_PANIC_TOPIC) {
+    const parsed = parseMqttJsonPayload(trimmed);
+    const errorCode = parsed ? parseNumeric(parsed.error_code) : null;
+    const available = parsed?.available;
+    const rawBacktrace = parsed?.backtrace;
+
+    if (
+      typeof available !== 'boolean' ||
+      errorCode === null ||
+      (rawBacktrace !== undefined &&
+        (!Array.isArray(rawBacktrace) ||
+          rawBacktrace.some((address) => typeof address !== 'string')))
+    ) {
+      console.warn('[MQTT] Ringkasan core dump ESP32 tidak valid:', payload);
+      return;
+    }
+
+    panicDumpSnapshot = {
+      available,
+      errorCode,
+      publishedAfterResetReason: typeof parsed.published_after_reset_reason === 'string'
+        ? parsed.published_after_reset_reason
+        : 'UNKNOWN',
+      task: typeof parsed.task === 'string' ? parsed.task : null,
+      pc: typeof parsed.pc === 'string' ? parsed.pc : null,
+      exceptionCause: parseNumeric(parsed.exception_cause),
+      exceptionAddress: typeof parsed.exception_address === 'string' ? parsed.exception_address : null,
+      backtrace: Array.isArray(rawBacktrace) ? rawBacktrace.filter((address): address is string => typeof address === 'string').slice(0, 16) : [],
+      backtraceCorrupted: typeof parsed.backtrace_corrupted === 'boolean' ? parsed.backtrace_corrupted : null,
+      firmwareElfSha256: typeof parsed.firmware_elf_sha256 === 'string' ? parsed.firmware_elf_sha256 : null,
+      updatedAt: now,
+    };
+    setSnapshot({
+      panicDumpSnapshot,
       lastTopic: topic,
       lastPayload: payload,
       lastMessageAt: now,

@@ -101,14 +101,18 @@ function normalizeSettings(input = {}) {
   const [safeSoilLow, safeSoilHigh] = normalizeRange(soilLow, soilHigh, 0, 100, defaults.soil_threshold_low, defaults.soil_threshold_high);
   const [safeHumidityLow, safeHumidityHigh] = normalizeRange(humidityLow, humidityHigh, 0, 100, defaults.humidity_threshold_low, defaults.humidity_threshold_high);
 
+  const rawTempLow = clampNumber(obj.temp_threshold_low ?? defaults.temp_threshold_low, -20, 60, defaults.temp_threshold_low);
+  const rawTempHigh = clampNumber(obj.temp_threshold_high ?? defaults.temp_threshold_high, -20, 60, defaults.temp_threshold_high);
+  const [safeTempLow, safeTempHigh] = normalizeRange(rawTempLow, rawTempHigh, -20, 60, defaults.temp_threshold_low, defaults.temp_threshold_high);
+
   return {
     ...obj,
     id: 1,
     plant_phase: phase,
     crop_mode: phase,
     location: normalizeLocation(obj.location),
-    temp_threshold_high: clampNumber(obj.temp_threshold_high ?? defaults.temp_threshold_high, -20, 60, defaults.temp_threshold_high),
-    temp_threshold_low: clampNumber(obj.temp_threshold_low ?? defaults.temp_threshold_low, -20, 60, defaults.temp_threshold_low),
+    temp_threshold_high: safeTempHigh,
+    temp_threshold_low: safeTempLow,
     soil_threshold_low: safeSoilLow,
     soil_threshold_high: safeSoilHigh,
     soil_threshold_critical: Math.min(Math.max(0, soilCritical), safeSoilLow),
@@ -207,7 +211,15 @@ export default async function handler(req, res) {
       const user = await requireFirebaseAdmin(req, res);
       if (!user) return;
 
-      const updates = req.body || {};
+      let updates = req.body || {};
+      if (typeof updates === 'string') {
+        try {
+          updates = JSON.parse(updates);
+        } catch {
+          updates = {};
+        }
+      }
+
       const payload = normalizeSettings(updates);
       const dbPayload = filterSettingsForDatabase(payload);
 
@@ -222,7 +234,17 @@ export default async function handler(req, res) {
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('[api/settings] Supabase upsert error:', error);
+        if (error.code === '42501') {
+          return res.status(500).json({
+            error: 'Database RLS policy error: Akses simpan ke tabel "settings" ditolak oleh Row Level Security (RLS) di Supabase. Harap nonaktifkan RLS pada tabel settings di Supabase SQL Editor atau atur SUPABASE_SERVICE_ROLE_KEY di Vercel.',
+            code: error.code,
+            details: error.message,
+          });
+        }
+        throw error;
+      }
 
       await supabase.from('activity_logs').insert({
         type: 'settings',
@@ -236,6 +258,11 @@ export default async function handler(req, res) {
     res.status(405).json({ error: 'Method not allowed' });
   } catch (err) {
     console.error('Settings API error:', err);
-    res.status(500).json({ error: err instanceof Error ? err.message : 'Unknown error' });
+    const message = err instanceof Error ? err.message : (err?.message || (typeof err === 'string' ? err : 'Unknown error'));
+    res.status(500).json({
+      error: message,
+      code: err?.code,
+      details: err?.details || err?.hint || null,
+    });
   }
 }

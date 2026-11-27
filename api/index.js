@@ -93,7 +93,8 @@ export default async function handler(req, res) {
     console.error(`[API Router] Error in /api/${routeName}:`, err);
     if (!res.headersSent) {
       res.setHeader('Content-Type', 'application/json');
-      res.status(500).json({ error: err instanceof Error ? err.message : 'Internal Server Error' });
+      const message = err instanceof Error ? err.message : (err?.message || (typeof err === 'string' ? err : 'Internal Server Error'));
+      res.status(500).json({ error: message, code: err?.code });
     }
   }
 }

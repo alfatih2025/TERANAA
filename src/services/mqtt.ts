@@ -44,8 +44,6 @@ const TOPIC_KARHUTLA_FWI = 'sproutai/karhutla/fwi';
 const TOPIC_KARHUTLA_ALERT = 'sproutai/karhutla/alert';
 const TOPIC_FLOW = 'sproutai/sensor/flow';
 const TOPIC_ACTUATOR_STATUS = 'sproutai/actuator/status';
-const TOPIC_SIMULATION_COMMAND = 'sproutai/simulation/cmd';
-const TOPIC_SIMULATION_STATUS = 'sproutai/simulation/status';
 
 const SUBSCRIBE_TOPICS = [
   DEVICE_STATUS_TOPIC,
@@ -60,7 +58,6 @@ const SUBSCRIBE_TOPICS = [
   TOPIC_PH,
   TOPIC_FLOW,
   TOPIC_ACTUATOR_STATUS,
-  TOPIC_SIMULATION_STATUS,
   TOPIC_SOIL,
   TOPIC_TEMP,
   TOPIC_HUMIDITY,
@@ -143,23 +140,6 @@ export interface MqttActuatorSnapshot {
   sourceTopic: string | null;
 }
 
-export interface MqttSimulationSnapshot {
-  requestId: string | null;
-  action: string | null;
-  state: string;
-  message: string;
-  armed: boolean;
-  mode: string | null;
-  irigasi: boolean | null;
-  fertigasi: boolean | null;
-  pompa: boolean | null;
-  activeValve: string | null;
-  flowRate: number | null;
-  currentLiters: number | null;
-  targetLiters: number | null;
-  updatedAt: string | null;
-}
-
 export interface MqttFlowCounterResetSnapshot {
   requestId: string;
   counter: 'session' | 'total';
@@ -203,7 +183,6 @@ export interface MqttStatusSnapshot {
   subscribedTopics: string[];
   sensorSnapshot: MqttSensorSnapshot | null;
   actuatorSnapshot: MqttActuatorSnapshot | null;
-  simulationSnapshot: MqttSimulationSnapshot | null;
   scheduleSnapshot?: MqttScheduleSnapshot | null;
 }
 
@@ -332,14 +311,12 @@ const defaultSnapshot = (): MqttStatusSnapshot => ({
   subscribedTopics: SUBSCRIBE_TOPICS,
   sensorSnapshot: null,
   actuatorSnapshot: getInitialSavedActuator(),
-  simulationSnapshot: null,
   scheduleSnapshot: getInitialSavedSchedule(),
 });
 
 let snapshot: MqttStatusSnapshot = defaultSnapshot();
 let sensorSnapshot: MqttSensorSnapshot | null = null;
 let actuatorSnapshot: MqttActuatorSnapshot | null = getInitialSavedActuator();
-let simulationSnapshot: MqttSimulationSnapshot | null = null;
 let bootDiagnosticSnapshot: MqttBootDiagnosticSnapshot | null = null;
 let panicDumpSnapshot: MqttPanicDumpSnapshot | null = null;
 let flowCounterResetSnapshot: MqttFlowCounterResetSnapshot | null = null;
@@ -1057,35 +1034,6 @@ function updateFromTopic(topic: string, payload: string) {
     return;
   }
 
-  if (topic === TOPIC_SIMULATION_STATUS) {
-    const parsed = parseMqttJsonPayload(trimmed);
-    if (parsed) {
-      simulationSnapshot = {
-        requestId: typeof parsed.request_id === 'string' ? parsed.request_id : null,
-        action: typeof parsed.action === 'string' ? parsed.action : null,
-        state: typeof parsed.state === 'string' ? parsed.state : 'unknown',
-        message: typeof parsed.message === 'string' ? parsed.message : '',
-        armed: parseBoolean(parsed.armed) ?? false,
-        mode: typeof parsed.mode === 'string' ? parsed.mode : null,
-        irigasi: parseBoolean(parsed.irigasi) ?? null,
-        fertigasi: parseBoolean(parsed.fertigasi) ?? null,
-        pompa: parseBoolean(parsed.pompa) ?? null,
-        activeValve: typeof parsed.active_valve === 'string' ? parsed.active_valve : null,
-        flowRate: parseNumeric(parsed.flow_rate),
-        currentLiters: parseNumeric(parsed.current_liters),
-        targetLiters: parseNumeric(parsed.target_liters),
-        updatedAt: now,
-      };
-      setSnapshot({
-        simulationSnapshot,
-        lastTopic: topic,
-        lastPayload: payload,
-        lastMessageAt: now,
-      });
-    }
-    return;
-  }
-
   if (topic === DEVICE_STATUS_TOPIC) {
     const parsedStatus = parseStatusValue(trimmed);
     const isOnline = parsedStatus ?? true;
@@ -1576,42 +1524,6 @@ export async function resetFlowCounter(
   }
   if (response.state !== 'accepted') {
     throw new Error(response.message || 'ESP32 menolak reset volume.');
-  }
-  return response;
-}
-
-export type SimulationCommand =
-  | { action: 'arm'; confirm: 'ARM' }
-  | { action: 'disarm' }
-  | { action: 'sensor'; node: 1 | 2; soil: number; temp: number; rh: number; battery: number }
-  | { action: 'sensor'; node: 3; soil_temp: number; ambient_temp: number; ambient_hum: number; battery: number }
-  | { action: 'ph'; value: number }
-  | { action: 'rain'; value: number }
-  | { action: 'run' }
-  | { action: 'flow'; pulses: number; seconds: number };
-
-export async function sendSimulationCommand(command: SimulationCommand): Promise<MqttSimulationSnapshot> {
-  const requestId = `sim-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  const payload = JSON.stringify({ ...command, request_id: requestId });
-
-  await publishMqttWithAck(
-    TOPIC_SIMULATION_COMMAND,
-    payload,
-    TOPIC_SIMULATION_STATUS,
-    (_topic, message) => {
-      const response = parseMqttJsonPayload(message);
-      return response?.request_id === requestId && response.state !== 'queued';
-    },
-    15_000,
-    { retain: false, qos: 1 },
-  );
-
-  const response = simulationSnapshot;
-  if (!response || response.requestId !== requestId) {
-    throw new Error('ESP32 tidak mengirim status hasil simulasi.');
-  }
-  if (response.state === 'rejected') {
-    throw new Error(response.message || 'ESP32 menolak perintah simulasi.');
   }
   return response;
 }

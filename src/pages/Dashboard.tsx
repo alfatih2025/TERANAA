@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { MessageSquare, Network, Flame } from 'lucide-react';
+import { MessageSquare, Network, Flame, RotateCcw } from 'lucide-react';
 import { ChatInterface } from '../components/ChatInterface';
 import { NodeCard } from '../components/NodeCard';
 import { KarhutlaCard } from '../components/KarhutlaCard';
@@ -10,6 +10,33 @@ import { Settings } from '../hooks/useSettings';
 import { WeatherData } from '../hooks/useWeather';
 import { useMqttStatus } from '../hooks/useMqttStatus';
 
+const RESET_REASON_LABELS: Record<string, string> = {
+  POWERON: 'ESP32 dinyalakan',
+  EXTERNAL_RESET: 'Reset eksternal',
+  SOFTWARE_RESET: 'Reset software',
+  PANIC: 'Panic / crash firmware',
+  INTERRUPT_WDT: 'Interrupt watchdog',
+  TASK_WDT: 'Task watchdog',
+  OTHER_WDT: 'Watchdog',
+  DEEP_SLEEP: 'Bangun dari deep sleep',
+  'BROWNOUT/VOLTAGE_DROP': 'Brownout / tegangan turun',
+  SDIO: 'Reset SDIO',
+  UNKNOWN: 'Penyebab tidak diketahui',
+};
+
+function formatBootUptime(uptimeMs: number) {
+  const totalSeconds = Math.floor(uptimeMs / 1000);
+  const days = Math.floor(totalSeconds / 86_400);
+  const hours = Math.floor((totalSeconds % 86_400) / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (days > 0) return `${days} hari ${hours} jam`;
+  if (hours > 0) return `${hours} jam ${minutes} menit`;
+  if (minutes > 0) return `${minutes} menit ${seconds} detik`;
+  return `${seconds} detik`;
+}
+
 interface DashboardProps {
   sensorData: SensorData | null;
   settings: Settings | null;
@@ -18,7 +45,7 @@ interface DashboardProps {
 
 export function Dashboard({ sensorData, settings, weatherData }: DashboardProps) {
   const { node1, node2, node3, gateway, loading, isNode3Active } = useMultiNodeSensorData();
-  const { mqttConnected, actuatorSnapshot, espOnline } = useMqttStatus();
+  const { mqttConnected, actuatorSnapshot, espOnline, bootDiagnosticSnapshot } = useMqttStatus();
 
   // Mode implementasi Karhutla: User memegang kendali penuh (tersimpan di localStorage)
   const [karhutlaEnabled, setKarhutlaEnabled] = useState<boolean>(() => {
@@ -112,6 +139,59 @@ export function Dashboard({ sensorData, settings, weatherData }: DashboardProps)
           </div>
         </div>
       </div>
+
+      <section
+        aria-live="polite"
+        aria-label="Diagnostik boot ESP32"
+        className="glass-card rounded-2xl border border-slate-200 p-4 sm:p-5 dark:border-slate-800"
+      >
+        <div className="flex items-start gap-3">
+          <div className="rounded-xl bg-blue-100 p-2 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300">
+            <RotateCcw size={19} aria-hidden="true" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100">Diagnostik boot ESP32</h2>
+            <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+              Penyebab boot terakhir dikirim langsung oleh ESP32 melalui MQTT.
+            </p>
+          </div>
+          {bootDiagnosticSnapshot && (
+            <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              Boot #{bootDiagnosticSnapshot.bootCount.toLocaleString('id-ID')}
+            </span>
+          )}
+        </div>
+
+        {bootDiagnosticSnapshot ? (
+          <dl className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
+            <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/60">
+              <dt className="text-xs text-slate-500 dark:text-slate-400">Penyebab terakhir</dt>
+              <dd className="mt-1 font-semibold text-slate-900 dark:text-slate-100">
+                {RESET_REASON_LABELS[bootDiagnosticSnapshot.resetReason] ?? bootDiagnosticSnapshot.resetReason}
+                <span className="ml-1 font-mono text-xs font-normal text-slate-500">
+                  (kode {bootDiagnosticSnapshot.resetReasonCode})
+                </span>
+              </dd>
+            </div>
+            <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/60">
+              <dt className="text-xs text-slate-500 dark:text-slate-400">Uptime saat laporan</dt>
+              <dd className="mt-1 font-semibold text-slate-900 dark:text-slate-100">
+                {formatBootUptime(bootDiagnosticSnapshot.uptimeMs)}
+              </dd>
+            </div>
+            <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/60">
+              <dt className="text-xs text-slate-500 dark:text-slate-400">Data diterima web</dt>
+              <dd className="mt-1 font-semibold text-slate-900 dark:text-slate-100">
+                {new Date(bootDiagnosticSnapshot.updatedAt).toLocaleString('id-ID')}
+              </dd>
+            </div>
+          </dl>
+        ) : (
+          <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">
+            Menunggu diagnostik boot. Pastikan firmware terbaru sudah terpasang dan ESP32 berhasil tersambung ke MQTT.
+          </p>
+        )}
+      </section>
 
       {/* Kontrol Zona Pantau Gambut / Karhutla */}
       <div className="flex items-center justify-between p-3.5 sm:p-4 rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/30 dark:to-orange-950/30 border border-amber-200 dark:border-amber-800/60">

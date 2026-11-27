@@ -10,6 +10,7 @@ const MQTT_PASSWORD = (import.meta.env.VITE_MQTT_PASSWORD as string | undefined)
 
 const WEB_STATUS_TOPIC = 'sproutai/web/status';
 const DEVICE_STATUS_TOPIC = 'sproutai/esp32/status';
+const DEVICE_BOOT_TOPIC = 'sproutai/esp32/boot';
 const SYSTEM_STATUS_TOPIC = 'sproutai/system/status';
 
 const TOPIC_POMPA_CMD = 'sproutai/pompa/cmd';
@@ -45,6 +46,7 @@ const TOPIC_SIMULATION_STATUS = 'sproutai/simulation/status';
 
 const SUBSCRIBE_TOPICS = [
   DEVICE_STATUS_TOPIC,
+  DEVICE_BOOT_TOPIC,
   SYSTEM_STATUS_TOPIC,
   TOPIC_SENSOR_JSON,
   TOPIC_SENSOR_NODE,
@@ -173,6 +175,7 @@ export interface MqttStatusSnapshot {
   mqttError: string | null;
   espOnline: boolean;
   espLastSeenAt: string | null;
+  bootDiagnosticSnapshot: MqttBootDiagnosticSnapshot | null;
   systemOnline: boolean;
   systemLabel: string;
   systemDetail: string;
@@ -185,6 +188,14 @@ export interface MqttStatusSnapshot {
   actuatorSnapshot: MqttActuatorSnapshot | null;
   simulationSnapshot: MqttSimulationSnapshot | null;
   scheduleSnapshot?: MqttScheduleSnapshot | null;
+}
+
+export interface MqttBootDiagnosticSnapshot {
+  bootCount: number;
+  resetReason: string;
+  resetReasonCode: number;
+  uptimeMs: number;
+  updatedAt: string;
 }
 
 type SensorDelta = Partial<Omit<MqttSensorSnapshot, 'updatedAt' | 'sourceTopic'>>;
@@ -277,6 +288,7 @@ const defaultSnapshot = (): MqttStatusSnapshot => ({
   mqttError: BROKER_URL ? null : 'VITE_BROKER_URL belum diisi',
   espOnline: false,
   espLastSeenAt: null,
+  bootDiagnosticSnapshot: null,
   systemOnline: false,
   systemLabel: 'Sistem Offline',
   systemDetail: 'Koneksi belum tersedia',
@@ -295,6 +307,7 @@ let snapshot: MqttStatusSnapshot = defaultSnapshot();
 let sensorSnapshot: MqttSensorSnapshot | null = null;
 let actuatorSnapshot: MqttActuatorSnapshot | null = getInitialSavedActuator();
 let simulationSnapshot: MqttSimulationSnapshot | null = null;
+let bootDiagnosticSnapshot: MqttBootDiagnosticSnapshot | null = null;
 let scheduleSnapshot: MqttScheduleSnapshot = getInitialSavedSchedule();
 let sensorSnapshotByNode: Map<number, MqttSensorSnapshot> = new Map();
 let sensorHistory: MqttSensorSnapshot[] = [];
@@ -887,6 +900,43 @@ function parseStatusValue(payload: string): boolean | null {
 function updateFromTopic(topic: string, payload: string) {
   const now = new Date().toISOString();
   const trimmed = payload.trim();
+
+  if (topic === DEVICE_BOOT_TOPIC) {
+    const parsed = parseMqttJsonPayload(trimmed);
+    const bootCount = parsed ? parseNumeric(parsed.boot_count) : null;
+    const resetReason = parsed?.reset_reason;
+    const resetReasonCode = parsed ? parseNumeric(parsed.reset_reason_code) : null;
+    const uptimeMs = parsed ? parseNumeric(parsed.uptime_ms) : null;
+
+    if (
+      bootCount === null ||
+      !Number.isInteger(bootCount) ||
+      bootCount < 1 ||
+      typeof resetReason !== 'string' ||
+      resetReason.length === 0 ||
+      resetReasonCode === null ||
+      uptimeMs === null ||
+      uptimeMs < 0
+    ) {
+      console.warn('[MQTT] Diagnostik boot ESP32 tidak valid:', payload);
+      return;
+    }
+
+    bootDiagnosticSnapshot = {
+      bootCount,
+      resetReason,
+      resetReasonCode,
+      uptimeMs,
+      updatedAt: now,
+    };
+    setSnapshot({
+      bootDiagnosticSnapshot,
+      lastTopic: topic,
+      lastPayload: payload,
+      lastMessageAt: now,
+    });
+    return;
+  }
 
   if (topic === TOPIC_SIMULATION_STATUS) {
     const parsed = parseMqttJsonPayload(trimmed);

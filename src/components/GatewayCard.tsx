@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import { Activity, AlertTriangle, CheckCircle2, Droplets, FlaskConical, Gauge, Radio, Waves, Wifi, WifiOff } from 'lucide-react';
 import type { NodeSensorData } from '../hooks/useMultiNodeSensorData';
-import type { MqttActuatorSnapshot } from '../services/mqtt';
+import { resetFlowCounter, type MqttActuatorSnapshot } from '../services/mqtt';
 
 interface GatewayCardProps {
   data: NodeSensorData | null;
@@ -14,6 +15,9 @@ function formatVal(val: number | null | undefined, decimals = 1): string {
 }
 
 export function GatewayCard({ data, actuatorSnapshot, isOnline }: GatewayCardProps) {
+  const [resettingCounter, setResettingCounter] = useState<'session' | 'total' | null>(null);
+  const [resetFeedback, setResetFeedback] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
+
   // Ambil nilai prioritas dari data sensor node 0 atau snapshot aktuator
   const ph = data?.ph ?? actuatorSnapshot?.ph ?? null;
   const flowRate = data?.flow_rate ?? actuatorSnapshot?.flowRate ?? 0;
@@ -29,6 +33,7 @@ export function GatewayCard({ data, actuatorSnapshot, isOnline }: GatewayCardPro
   const mode = actuatorSnapshot?.mode ?? 'manual';
   const isWaterFlowing = flowRate > 0.05;
   const isValveOpenNoFlow = isValveActive && !isWaterFlowing;
+  const resetDisabled = isOnline !== true || isValveActive || isWaterFlowing || resettingCounter !== null;
 
   // Analisis status pH
   let phCategory = {
@@ -77,6 +82,27 @@ export function GatewayCard({ data, actuatorSnapshot, isOnline }: GatewayCardPro
   const sessionPercent = (targetWater && targetWater > 0)
     ? Math.min(100, Math.max(0, (sessionWater / targetWater) * 100))
     : null;
+
+  const handleResetCounter = async (counter: 'session' | 'total') => {
+    const confirmation = counter === 'total'
+      ? 'Reset total air kumulatif ke 0 L? Nilai ini tersimpan di ESP32 dan tidak dapat dipulihkan. Riwayat yang sudah tersimpan di web tidak dihapus.'
+      : 'Reset volume sesi ke 0 L? Pastikan pompa/katup mati dan aliran sudah berhenti.';
+    if (!window.confirm(confirmation)) return;
+
+    setResettingCounter(counter);
+    setResetFeedback(null);
+    try {
+      const result = await resetFlowCounter(counter);
+      setResetFeedback({ tone: 'success', message: result.message });
+    } catch (error) {
+      setResetFeedback({
+        tone: 'error',
+        message: error instanceof Error ? error.message : 'Reset volume gagal. Periksa koneksi MQTT dan ESP32.',
+      });
+    } finally {
+      setResettingCounter(null);
+    }
+  };
 
   return (
     <div className="glass-card rounded-2xl p-4 sm:p-6 flex flex-col relative overflow-hidden border border-emerald-200/60 dark:border-slate-800 shadow-sm group">
@@ -279,6 +305,41 @@ export function GatewayCard({ data, actuatorSnapshot, isOnline }: GatewayCardPro
                 </div>
                 <span className="text-[9px] text-slate-400">Penggunaan keseluruhan</span>
               </div>
+            </div>
+
+            <div className="mt-3 space-y-2">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => void handleResetCounter('session')}
+                  disabled={resetDisabled}
+                  className="min-h-11 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-400/30 dark:bg-slate-900 dark:text-blue-300 dark:hover:bg-blue-500/10 dark:focus-visible:ring-offset-slate-900"
+                >
+                  {resettingCounter === 'session' ? 'Mereset sesi…' : 'Reset volume sesi'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleResetCounter('total')}
+                  disabled={resetDisabled}
+                  className="min-h-11 rounded-xl border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-rose-400/30 dark:bg-slate-900 dark:text-rose-300 dark:hover:bg-rose-500/10 dark:focus-visible:ring-offset-slate-900"
+                >
+                  {resettingCounter === 'total' ? 'Mereset total…' : 'Reset total air'}
+                </button>
+              </div>
+              <p className="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+                Reset tersedia saat gateway online, aktuator mati, dan aliran berhenti stabil selama 5 detik. Reset total tidak menghapus riwayat web.
+              </p>
+              {resetFeedback && (
+                <p
+                  role={resetFeedback.tone === 'error' ? 'alert' : 'status'}
+                  aria-live={resetFeedback.tone === 'error' ? 'assertive' : 'polite'}
+                  className={`text-xs ${resetFeedback.tone === 'error'
+                    ? 'text-rose-700 dark:text-rose-300'
+                    : 'text-emerald-700 dark:text-emerald-300'}`}
+                >
+                  {resetFeedback.message}
+                </p>
+              )}
             </div>
           </div>
         </div>

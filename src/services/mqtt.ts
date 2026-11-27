@@ -37,6 +37,8 @@ const TOPIC_SOIL = 'sproutai/sensor/soil';
 const TOPIC_TEMP = 'sproutai/sensor/temp';
 const TOPIC_HUMIDITY = 'sproutai/sensor/humidity';
 const TOPIC_SCORE = 'sproutai/sensor/score';
+const TOPIC_FLOW_RESET_COMMAND = 'sproutai/flow/reset/cmd';
+const TOPIC_FLOW_RESET_STATUS = 'sproutai/flow/reset/status';
 const TOPIC_SYSTEM_FAULT = 'sproutai/system/fault';
 const TOPIC_KARHUTLA_FWI = 'sproutai/karhutla/fwi';
 const TOPIC_KARHUTLA_ALERT = 'sproutai/karhutla/alert';
@@ -52,6 +54,7 @@ const SUBSCRIBE_TOPICS = [
   SYSTEM_STATUS_TOPIC,
   TOPIC_SENSOR_JSON,
   TOPIC_SENSOR_NODE,
+  TOPIC_FLOW_RESET_STATUS,
   TOPIC_KARHUTLA_FWI,
   TOPIC_KARHUTLA_ALERT,
   TOPIC_PH,
@@ -157,6 +160,16 @@ export interface MqttSimulationSnapshot {
   updatedAt: string | null;
 }
 
+export interface MqttFlowCounterResetSnapshot {
+  requestId: string;
+  counter: 'session' | 'total';
+  state: 'queued' | 'accepted' | 'rejected' | 'error';
+  message: string;
+  sessionLiters: number | null;
+  totalLiters: number | null;
+  updatedAt: string;
+}
+
 export interface MqttScheduleSnapshot {
   schedule_enabled: boolean;
   watering_time: string;
@@ -179,6 +192,7 @@ export interface MqttStatusSnapshot {
   espLastSeenAt: string | null;
   bootDiagnosticSnapshot: MqttBootDiagnosticSnapshot | null;
   panicDumpSnapshot: MqttPanicDumpSnapshot | null;
+  flowCounterResetSnapshot: MqttFlowCounterResetSnapshot | null;
   systemOnline: boolean;
   systemLabel: string;
   systemDetail: string;
@@ -307,6 +321,7 @@ const defaultSnapshot = (): MqttStatusSnapshot => ({
   espLastSeenAt: null,
   bootDiagnosticSnapshot: null,
   panicDumpSnapshot: null,
+  flowCounterResetSnapshot: null,
   systemOnline: false,
   systemLabel: 'Sistem Offline',
   systemDetail: 'Koneksi belum tersedia',
@@ -327,6 +342,7 @@ let actuatorSnapshot: MqttActuatorSnapshot | null = getInitialSavedActuator();
 let simulationSnapshot: MqttSimulationSnapshot | null = null;
 let bootDiagnosticSnapshot: MqttBootDiagnosticSnapshot | null = null;
 let panicDumpSnapshot: MqttPanicDumpSnapshot | null = null;
+let flowCounterResetSnapshot: MqttFlowCounterResetSnapshot | null = null;
 let scheduleSnapshot: MqttScheduleSnapshot = getInitialSavedSchedule();
 let sensorSnapshotByNode: Map<number, MqttSensorSnapshot> = new Map();
 let sensorHistory: MqttSensorSnapshot[] = [];
@@ -998,6 +1014,49 @@ function updateFromTopic(topic: string, payload: string) {
     return;
   }
 
+  if (topic === TOPIC_FLOW_RESET_STATUS) {
+    const parsed = parseMqttJsonPayload(trimmed);
+    const requestId = parsed?.request_id;
+    const counter = parsed?.counter;
+    const state = parsed?.state;
+    const sessionLiters = parsed ? parseNumeric(parsed.session_liters) : null;
+    const totalLiters = parsed ? parseNumeric(parsed.total_liters) : null;
+
+    if (
+      typeof requestId !== 'string' ||
+      requestId.length === 0 ||
+      (counter !== 'session' && counter !== 'total') ||
+      (state !== 'queued' && state !== 'accepted' && state !== 'rejected' && state !== 'error') ||
+      typeof parsed?.message !== 'string' ||
+      sessionLiters === null ||
+      totalLiters === null
+    ) {
+      console.warn('[MQTT] Status reset volume ESP32 tidak valid:', payload);
+      return;
+    }
+
+    flowCounterResetSnapshot = {
+      requestId,
+      counter,
+      state,
+      message: parsed.message,
+      sessionLiters,
+      totalLiters,
+      updatedAt: now,
+    };
+    setActuatorSnapshot({
+      currentLiters: sessionLiters,
+      totalLiters,
+    }, topic);
+    setSnapshot({
+      flowCounterResetSnapshot,
+      lastTopic: topic,
+      lastPayload: payload,
+      lastMessageAt: now,
+    });
+    return;
+  }
+
   if (topic === TOPIC_SIMULATION_STATUS) {
     const parsed = parseMqttJsonPayload(trimmed);
     if (parsed) {
@@ -1489,6 +1548,36 @@ export async function publishMqttWithAck(
       reject(err);
     });
   });
+}
+
+export async function resetFlowCounter(
+  counter: MqttFlowCounterResetSnapshot['counter'],
+): Promise<MqttFlowCounterResetSnapshot> {
+  const requestId = `flow-reset-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  const payload = JSON.stringify({ request_id: requestId, counter });
+
+  await publishMqttWithAck(
+    TOPIC_FLOW_RESET_COMMAND,
+    payload,
+    TOPIC_FLOW_RESET_STATUS,
+    (_topic, message) => {
+      const response = parseMqttJsonPayload(message);
+      return response?.request_id === requestId &&
+        response.counter === counter &&
+        response.state !== 'queued';
+    },
+    15_000,
+    { retain: false, qos: 1 },
+  );
+
+  const response = flowCounterResetSnapshot;
+  if (!response || response.requestId !== requestId || response.counter !== counter) {
+    throw new Error('ESP32 tidak mengirim status hasil reset volume.');
+  }
+  if (response.state !== 'accepted') {
+    throw new Error(response.message || 'ESP32 menolak reset volume.');
+  }
+  return response;
 }
 
 export type SimulationCommand =

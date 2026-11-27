@@ -39,6 +39,8 @@ const TOPIC_HUMIDITY = 'sproutai/sensor/humidity';
 const TOPIC_SCORE = 'sproutai/sensor/score';
 const TOPIC_FLOW_RESET_COMMAND = 'sproutai/flow/reset/cmd';
 const TOPIC_FLOW_RESET_STATUS = 'sproutai/flow/reset/status';
+const TOPIC_FLOW_TEST_COMMAND = 'sproutai/actuator/flow-test/cmd';
+const TOPIC_FLOW_TEST_STATUS = 'sproutai/actuator/flow-test/status';
 const TOPIC_SYSTEM_FAULT = 'sproutai/system/fault';
 const TOPIC_KARHUTLA_FWI = 'sproutai/karhutla/fwi';
 const TOPIC_KARHUTLA_ALERT = 'sproutai/karhutla/alert';
@@ -53,6 +55,7 @@ const SUBSCRIBE_TOPICS = [
   TOPIC_SENSOR_JSON,
   TOPIC_SENSOR_NODE,
   TOPIC_FLOW_RESET_STATUS,
+  TOPIC_FLOW_TEST_STATUS,
   TOPIC_KARHUTLA_FWI,
   TOPIC_KARHUTLA_ALERT,
   TOPIC_PH,
@@ -150,6 +153,16 @@ export interface MqttFlowCounterResetSnapshot {
   updatedAt: string;
 }
 
+export interface MqttIrrigationFlowTestSnapshot {
+  requestId: string;
+  state: 'started' | 'completed' | 'stopped' | 'rejected' | 'failed';
+  message: string;
+  targetLiters: number;
+  currentLiters: number;
+  flowRate: number;
+  updatedAt: string;
+}
+
 export interface MqttScheduleSnapshot {
   schedule_enabled: boolean;
   watering_time: string;
@@ -173,6 +186,7 @@ export interface MqttStatusSnapshot {
   bootDiagnosticSnapshot: MqttBootDiagnosticSnapshot | null;
   panicDumpSnapshot: MqttPanicDumpSnapshot | null;
   flowCounterResetSnapshot: MqttFlowCounterResetSnapshot | null;
+  irrigationFlowTestSnapshot: MqttIrrigationFlowTestSnapshot | null;
   systemOnline: boolean;
   systemLabel: string;
   systemDetail: string;
@@ -301,6 +315,7 @@ const defaultSnapshot = (): MqttStatusSnapshot => ({
   bootDiagnosticSnapshot: null,
   panicDumpSnapshot: null,
   flowCounterResetSnapshot: null,
+  irrigationFlowTestSnapshot: null,
   systemOnline: false,
   systemLabel: 'Sistem Offline',
   systemDetail: 'Koneksi belum tersedia',
@@ -1034,6 +1049,45 @@ function updateFromTopic(topic: string, payload: string) {
     return;
   }
 
+  if (topic === TOPIC_FLOW_TEST_STATUS) {
+    const parsed = parseMqttJsonPayload(trimmed);
+    const requestId = parsed?.request_id;
+    const state = parsed?.state;
+    const targetLiters = parsed ? parseNumeric(parsed.target_liters) : null;
+    const currentLiters = parsed ? parseNumeric(parsed.current_liters) : null;
+    const flowRate = parsed ? parseNumeric(parsed.flow_rate) : null;
+
+    if (
+      typeof requestId !== 'string' ||
+      requestId.length === 0 ||
+      (state !== 'started' && state !== 'completed' && state !== 'stopped' && state !== 'rejected' && state !== 'failed') ||
+      typeof parsed?.message !== 'string' ||
+      targetLiters === null ||
+      currentLiters === null ||
+      flowRate === null
+    ) {
+      console.warn('[MQTT] Status uji pompa ESP32 tidak valid:', payload);
+      return;
+    }
+
+    const irrigationFlowTestSnapshot: MqttIrrigationFlowTestSnapshot = {
+      requestId,
+      state,
+      message: parsed.message,
+      targetLiters,
+      currentLiters,
+      flowRate,
+      updatedAt: now,
+    };
+    setSnapshot({
+      irrigationFlowTestSnapshot,
+      lastTopic: topic,
+      lastPayload: payload,
+      lastMessageAt: now,
+    });
+    return;
+  }
+
   if (topic === DEVICE_STATUS_TOPIC) {
     const parsedStatus = parseStatusValue(trimmed);
     const isOnline = parsedStatus ?? true;
@@ -1524,6 +1578,75 @@ export async function resetFlowCounter(
   }
   if (response.state !== 'accepted') {
     throw new Error(response.message || 'ESP32 menolak reset volume.');
+  }
+  return response;
+}
+
+export function createIrrigationFlowTestRequestId() {
+  return `pump-test-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export async function startIrrigationFlowTest(
+  requestId: string,
+  targetLiters: number,
+): Promise<MqttIrrigationFlowTestSnapshot> {
+  if (!requestId || requestId.length > 40) {
+    throw new Error('ID uji pompa tidak valid.');
+  }
+  if (!Number.isFinite(targetLiters) || targetLiters < 0.2 || targetLiters > 0.5) {
+    throw new Error('Target uji pompa harus 0,2 sampai 0,5 liter.');
+  }
+
+  await publishMqttWithAck(
+    TOPIC_FLOW_TEST_COMMAND,
+    JSON.stringify({ action: 'START', request_id: requestId, target_liters: targetLiters }),
+    TOPIC_FLOW_TEST_STATUS,
+    (_topic, message) => {
+      const parsed = parseMqttJsonPayload(message);
+      if (parsed?.request_id !== requestId) return false;
+      return parsed.state === 'started' || parsed.state === 'rejected';
+    },
+    15_000,
+    { retain: false, qos: 1 },
+  );
+
+  const response = snapshot.irrigationFlowTestSnapshot;
+  if (!response || response.requestId !== requestId) {
+    throw new Error('ESP32 tidak mengirim status awal uji pompa.');
+  }
+  if (response.state === 'rejected') {
+    throw new Error(response.message || 'ESP32 menolak uji pompa.');
+  }
+  return response;
+}
+
+export async function stopIrrigationFlowTest(requestId: string): Promise<MqttIrrigationFlowTestSnapshot> {
+  if (!requestId || requestId.length > 40) {
+    throw new Error('ID uji pompa tidak valid.');
+  }
+
+  await publishMqttWithAck(
+    TOPIC_FLOW_TEST_COMMAND,
+    JSON.stringify({ action: 'STOP', request_id: requestId }),
+    TOPIC_FLOW_TEST_STATUS,
+    (_topic, message) => {
+      const parsed = parseMqttJsonPayload(message);
+      if (parsed?.request_id !== requestId) return false;
+      return parsed.state === 'stopped' ||
+        parsed.state === 'completed' ||
+        parsed.state === 'failed' ||
+        parsed.state === 'rejected';
+    },
+    10_000,
+    { retain: false, qos: 1 },
+  );
+
+  const response = snapshot.irrigationFlowTestSnapshot;
+  if (!response || response.requestId !== requestId) {
+    throw new Error('ESP32 tidak mengirim status penghentian uji pompa.');
+  }
+  if (response.state === 'rejected') {
+    throw new Error(response.message || 'ESP32 menolak penghentian uji pompa.');
   }
   return response;
 }

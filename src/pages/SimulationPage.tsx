@@ -15,6 +15,12 @@ import {
   Thermometer,
 } from 'lucide-react';
 import { DEFAULT_SETTINGS, useSettings } from '../context/SettingsContext';
+import { useMqttStatus } from '../hooks/useMqttStatus';
+import {
+  createIrrigationFlowTestRequestId,
+  startIrrigationFlowTest,
+  stopIrrigationFlowTest,
+} from '../services/mqtt';
 import {
   advanceSimulationFlow,
   evaluateIrrigationScenario,
@@ -266,6 +272,7 @@ function formatValue(value: number | null | undefined, digits = 2) {
 
 export function SimulationPage() {
   const { settings: storedSettings, loading: settingsLoading } = useSettings();
+  const { actuatorSnapshot, espOnline, mqttConnected, sensorSnapshot, irrigationFlowTestSnapshot } = useMqttStatus();
   const settings = storedSettings ?? DEFAULT_SETTINGS;
   const [form, setForm] = useState<SimulationForm>(makeInitialForm);
   const [phaseChoice, setPhaseChoice] = useState<'settings' | SimulationPhase>('settings');
@@ -273,6 +280,11 @@ export function SimulationPage() {
   const [error, setError] = useState<string | null>(null);
   const [flowPulses, setFlowPulses] = useState('450');
   const [flowSeconds, setFlowSeconds] = useState('10');
+  const [hardwareTestTarget, setHardwareTestTarget] = useState('0.3');
+  const [hardwareTestConfirmed, setHardwareTestConfirmed] = useState(false);
+  const [hardwareTestRequestId, setHardwareTestRequestId] = useState<string | null>(null);
+  const [hardwareTestPending, setHardwareTestPending] = useState(false);
+  const [hardwareTestError, setHardwareTestError] = useState<string | null>(null);
 
   const phase = phaseChoice === 'settings' ? settings.plant_phase : phaseChoice;
   const scheduleEnabled = form.scheduleEnabled ?? settings.watering_enabled;
@@ -407,6 +419,61 @@ export function SimulationPage() {
         : 0;
   const anyRelayActive = relayOutputs !== null &&
     (relayOutputs.irrigation || relayOutputs.fertilizer || relayOutputs.pump);
+  const hardwareStatusFresh = espOnline && actuatorSnapshot?.updatedAt != null;
+  const realFlowRate = actuatorSnapshot?.flowRate ?? sensorSnapshot?.flow_rate ?? null;
+  const activeHardwareTestRequestId = irrigationFlowTestSnapshot?.state === 'started'
+    ? irrigationFlowTestSnapshot.requestId
+    : null;
+  const currentHardwareTestRequestId = hardwareTestRequestId ?? activeHardwareTestRequestId;
+  const hardwareTestSnapshot = irrigationFlowTestSnapshot?.requestId === currentHardwareTestRequestId
+    ? irrigationFlowTestSnapshot
+    : null;
+  const hardwareTestRunning = hardwareTestSnapshot?.state === 'started';
+  const hardwareTargetLiters = Number(hardwareTestTarget);
+  const hardwareTargetValid = Number.isFinite(hardwareTargetLiters) && hardwareTargetLiters >= 0.2 && hardwareTargetLiters <= 0.5;
+  const hardwareActuatorsIdle = actuatorSnapshot?.irigasi === false &&
+    actuatorSnapshot.fertigasi === false &&
+    actuatorSnapshot.pompa === false;
+  const canStartHardwareTest = mqttConnected &&
+    espOnline &&
+    hardwareStatusFresh &&
+    actuatorSnapshot?.mode === 'manual' &&
+    hardwareActuatorsIdle &&
+    realFlowRate !== null &&
+    realFlowRate < 0.05 &&
+    hardwareTargetValid &&
+    hardwareTestConfirmed &&
+    !hardwareTestPending &&
+    !hardwareTestRunning;
+
+  const startHardwarePumpTest = async () => {
+    if (!canStartHardwareTest) return;
+    const requestId = createIrrigationFlowTestRequestId();
+    setHardwareTestRequestId(requestId);
+    setHardwareTestError(null);
+    setHardwareTestConfirmed(false);
+    setHardwareTestPending(true);
+    try {
+      await startIrrigationFlowTest(requestId, hardwareTargetLiters);
+    } catch (cause) {
+      setHardwareTestError(cause instanceof Error ? cause.message : 'Uji pompa tidak dapat dimulai.');
+    } finally {
+      setHardwareTestPending(false);
+    }
+  };
+
+  const stopHardwarePumpTest = async () => {
+    if (!currentHardwareTestRequestId || hardwareTestPending) return;
+    setHardwareTestError(null);
+    setHardwareTestPending(true);
+    try {
+      await stopIrrigationFlowTest(currentHardwareTestRequestId);
+    } catch (cause) {
+      setHardwareTestError(cause instanceof Error ? cause.message : 'Perintah berhenti tidak dapat dikirim.');
+    } finally {
+      setHardwareTestPending(false);
+    }
+  };
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 pb-8">
@@ -424,15 +491,15 @@ export function SimulationPage() {
         </div>
         <span className="inline-flex min-h-10 items-center gap-2 self-start rounded-full bg-green-100 px-3 py-2 text-sm font-semibold text-green-800 dark:bg-green-500/15 dark:text-green-200">
           <ShieldCheck size={16} aria-hidden="true" />
-          Lokal · tanpa MQTT / ESP32
+          Simulasi lokal · uji hardware terpisah
         </span>
       </header>
 
       <div className="flex items-start gap-3 rounded-2xl border border-green-300 bg-green-50 p-4 text-sm leading-6 text-green-950 dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-100">
         <CheckCircle2 className="mt-0.5 shrink-0" size={19} aria-hidden="true" />
         <p>
-          Seluruh simulasi dihitung di browser. Input dan pulsa flow tidak dikirim ke perangkat, MQTT, maupun API sensor;
-          semua relay pada hasil adalah status virtual dan tidak dapat menyalakan hardware.
+          Perhitungan dan pulsa flow simulasi tetap lokal; relay virtual tidak mengendalikan perangkat. Uji pompa fisik,
+          jika dipilih secara terpisah di bawah, memakai flowmeter ESP32 dan batas volume firmware.
         </p>
       </div>
 
@@ -602,6 +669,101 @@ export function SimulationPage() {
         </button>
       </div>
 
+      <SectionCard
+        title="Uji pompa nyata · air saja"
+        description="Aksi ini terpisah dari simulasi. ESP32 menyalakan relay irigasi dan mematikannya sendiri saat volume flowmeter nyata mencapai target."
+        icon={<ShieldCheck size={19} />}
+      >
+        <div className="space-y-4">
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm leading-6 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+            Uji hanya dengan jalur air bersih, buang aliran ke area aman, dan pastikan tidak ada pupuk/larutan kimia.
+            Target dibatasi 0,2–0,5 L; ESP32 juga berhenti jika tidak ada flow selama 8 detik atau setelah 30 detik.
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <MetricCard
+              label="Koneksi perangkat"
+              value={!mqttConnected ? 'MQTT OFF' : !espOnline ? 'ESP32 OFF' : hardwareStatusFresh ? 'ONLINE' : 'Status lama'}
+              detail={hardwareStatusFresh ? 'Telemetri ESP32 baru' : 'Menunggu status aktuator terbaru'}
+            />
+            <MetricCard
+              label="Relay/pompa nyata"
+              value={actuatorSnapshot?.pompa === true ? 'ON' : actuatorSnapshot?.pompa === false ? 'OFF' : '—'}
+              detail={actuatorSnapshot?.activeValve ?? 'Belum ada status aktuator'}
+            />
+            <MetricCard
+              label="Flow nyata ESP32"
+              value={realFlowRate === null ? '—' : `${formatValue(realFlowRate)} L/menit`}
+              detail={`${formatValue(actuatorSnapshot?.currentLiters ?? sensorSnapshot?.session_water)} L sesi`}
+            />
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-[minmax(160px,220px)_1fr] sm:items-end">
+            <NumberField
+              id="hardware-test-target"
+              label="Target volume uji"
+              value={hardwareTestTarget}
+              onChange={setHardwareTestTarget}
+              unit="L"
+              min={0.2}
+              max={0.5}
+              step={0.05}
+            />
+            <p className="text-sm leading-6 text-slate-600 dark:text-slate-400">
+              Syarat mulai: gateway online, status aktuator terbaru, mode MANUAL, semua relay OFF, dan flow nyata di bawah 0,05 L/menit.
+            </p>
+          </div>
+
+          <CheckField
+            checked={hardwareTestConfirmed}
+            label="Saya sudah memastikan jalur hanya berisi air bersih dan area keluaran aman."
+            description="Konfirmasi ini wajib untuk setiap uji; simulasi virtual tidak ikut menyalakan relay."
+            onChange={setHardwareTestConfirmed}
+          />
+
+          {hardwareTestError && (
+            <p className="rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200" role="alert">
+              {hardwareTestError}
+            </p>
+          )}
+
+          {hardwareTestSnapshot && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-800" role="status" aria-live="polite">
+              <p className="font-semibold text-slate-900 dark:text-slate-100">
+                Status uji: {hardwareTestSnapshot.state.toUpperCase()} · {hardwareTestSnapshot.message}
+              </p>
+              <p className="mt-1 text-slate-600 dark:text-slate-300">
+                Flowmeter nyata: {formatValue(hardwareTestSnapshot.currentLiters)} / {formatValue(hardwareTestSnapshot.targetLiters)} L
+                {' · '}debit {formatValue(hardwareTestSnapshot.flowRate)} L/menit
+              </p>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <button
+              type="button"
+              onClick={startHardwarePumpTest}
+              disabled={!canStartHardwareTest}
+              className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-green-700 px-4 py-2.5 font-semibold text-white transition-colors hover:bg-green-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Play size={17} aria-hidden="true" />
+              {hardwareTestPending ? 'Menghubungi ESP32…' : 'Mulai uji pompa fisik'}
+            </button>
+            {hardwareTestRunning && currentHardwareTestRequestId && (
+              <button
+                type="button"
+                onClick={stopHardwarePumpTest}
+                disabled={hardwareTestPending}
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-red-300 bg-red-50 px-4 py-2.5 font-semibold text-red-800 transition-colors hover:bg-red-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200 dark:hover:bg-red-500/20"
+              >
+                <AlertTriangle size={17} aria-hidden="true" />
+                Hentikan uji sekarang
+              </button>
+            )}
+          </div>
+        </div>
+      </SectionCard>
+
       {result && (
         <section className="space-y-5" aria-labelledby="simulation-results" aria-live="polite">
           <div className="flex flex-col gap-3 rounded-3xl border border-green-300 bg-green-50 p-5 dark:border-green-500/30 dark:bg-green-500/10 sm:flex-row sm:items-start">
@@ -755,6 +917,7 @@ export function SimulationPage() {
               </div>
             </div>
           </SectionCard>
+
         </section>
       )}
     </div>

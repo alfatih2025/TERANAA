@@ -280,7 +280,6 @@ export function SimulationPage() {
   const [error, setError] = useState<string | null>(null);
   const [flowPulses, setFlowPulses] = useState('450');
   const [flowSeconds, setFlowSeconds] = useState('10');
-  const [hardwareTestTarget, setHardwareTestTarget] = useState('0.3');
   const [hardwareTestConfirmed, setHardwareTestConfirmed] = useState(false);
   const [hardwareTestRequestId, setHardwareTestRequestId] = useState<string | null>(null);
   const [hardwareTestPending, setHardwareTestPending] = useState(false);
@@ -421,16 +420,23 @@ export function SimulationPage() {
     (relayOutputs.irrigation || relayOutputs.fertilizer || relayOutputs.pump);
   const hardwareStatusFresh = espOnline && actuatorSnapshot?.updatedAt != null;
   const realFlowRate = actuatorSnapshot?.flowRate ?? sensorSnapshot?.flow_rate ?? null;
-  const activeHardwareTestRequestId = irrigationFlowTestSnapshot?.state === 'started'
+  const activeHardwareTestRequestId = irrigationFlowTestSnapshot?.state === 'started' &&
+    actuatorSnapshot?.pompa !== false
     ? irrigationFlowTestSnapshot.requestId
     : null;
   const currentHardwareTestRequestId = hardwareTestRequestId ?? activeHardwareTestRequestId;
   const hardwareTestSnapshot = irrigationFlowTestSnapshot?.requestId === currentHardwareTestRequestId
     ? irrigationFlowTestSnapshot
     : null;
-  const hardwareTestRunning = hardwareTestSnapshot?.state === 'started';
-  const hardwareTargetLiters = Number(hardwareTestTarget);
-  const hardwareTargetValid = Number.isFinite(hardwareTargetLiters) && hardwareTargetLiters >= 0.2 && hardwareTargetLiters <= 0.5;
+  const hardwareTestRunning = hardwareTestSnapshot?.state === 'started' &&
+    actuatorSnapshot?.pompa !== false;
+  const physicalWaterStage = result !== null &&
+    ['IRIGASI', 'PRE_WET', 'POST_FLUSH'].includes(result.actuator.stage) &&
+    relayOutputs?.irrigation === true;
+  const hardwareTargetLiters = physicalWaterStage && result
+    ? Math.min(0.5, Math.max(0.2, result.actuator.targetLiters))
+    : 0;
+  const hardwareTargetValid = hardwareTargetLiters >= 0.2 && hardwareTargetLiters <= 0.5;
   const hardwareActuatorsIdle = actuatorSnapshot?.irigasi === false &&
     actuatorSnapshot.fertigasi === false &&
     actuatorSnapshot.pompa === false;
@@ -442,9 +448,33 @@ export function SimulationPage() {
     realFlowRate !== null &&
     realFlowRate < 0.05 &&
     hardwareTargetValid &&
+    physicalWaterStage &&
     hardwareTestConfirmed &&
     !hardwareTestPending &&
     !hardwareTestRunning;
+  const hardwareTestBlockedReason = hardwareTestPending
+    ? 'Perintah sedang diproses.'
+    : hardwareTestRunning
+      ? 'Uji fisik sedang berjalan; gunakan tombol berhenti.'
+      : !physicalWaterStage
+        ? 'Hitung hasil simulasi yang meminta tahap IRIGASI, PRE-WET, atau POST-FLUSH.'
+        : !mqttConnected
+          ? 'MQTT web belum terhubung.'
+          : !espOnline
+            ? 'Gateway ESP32 belum online.'
+            : !hardwareStatusFresh
+              ? 'Menunggu status aktuator terbaru dari ESP32.'
+              : actuatorSnapshot?.mode !== 'manual'
+                ? 'Ubah mode Gateway ke MANUAL.'
+                : !hardwareActuatorsIdle
+                  ? 'Matikan aktuator yang sedang aktif sebelum uji.'
+                  : realFlowRate === null
+                    ? 'Menunggu pembacaan flowmeter nyata.'
+                    : realFlowRate >= 0.05
+                      ? 'Flowmeter masih mendeteksi aliran; tunggu hingga berhenti.'
+                      : !hardwareTestConfirmed
+                        ? 'Centang konfirmasi jalur air bersih dan keluaran aman.'
+                        : null;
 
   const startHardwarePumpTest = async () => {
     if (!canStartHardwareTest) return;
@@ -498,8 +528,9 @@ export function SimulationPage() {
       <div className="flex items-start gap-3 rounded-2xl border border-green-300 bg-green-50 p-4 text-sm leading-6 text-green-950 dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-100">
         <CheckCircle2 className="mt-0.5 shrink-0" size={19} aria-hidden="true" />
         <p>
-          Perhitungan dan pulsa flow simulasi tetap lokal; relay virtual tidak mengendalikan perangkat. Uji pompa fisik,
-          jika dipilih secara terpisah di bawah, memakai flowmeter ESP32 dan batas volume firmware.
+            Perhitungan dan pulsa simulasi tetap lokal. Data Node 1–3 yang sebenarnya tetap dikirim seperti biasa;
+            nilai simulasi tidak menggantikan atau mengirim data sensor palsu. Setelah hasil menunjukkan tahap air bersih
+            aktif, Anda dapat memilih uji fisik terpisah yang dibatasi flowmeter ESP32.
         </p>
       </div>
 
@@ -671,20 +702,26 @@ export function SimulationPage() {
 
       <SectionCard
         title="Uji pompa nyata · air saja"
-        description="Aksi ini terpisah dari simulasi. ESP32 menyalakan relay irigasi dan mematikannya sendiri saat volume flowmeter nyata mencapai target."
+        description="Menjalankan keluaran tahap irigasi air bersih dari hasil simulasi sebagai uji fisik terbatas. Tidak mengubah data node atau menjalankan dosing pupuk."
         icon={<ShieldCheck size={19} />}
       >
         <div className="space-y-4">
           <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm leading-6 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
             Uji hanya dengan jalur air bersih, buang aliran ke area aman, dan pastikan tidak ada pupuk/larutan kimia.
-            Target dibatasi 0,2–0,5 L; ESP32 juga berhenti jika tidak ada flow selama 8 detik atau setelah 30 detik.
+            Target uji dibatasi 0,2–0,5 L. ESP32 mematikan relay saat target flowmeter nyata tercapai, jika tidak ada flow selama 8 detik,
+            atau setelah 30 detik. Dosing fertigasi dan jadwal berbasis waktu tidak dijalankan sebagai uji fisik.
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <MetricCard
               label="Koneksi perangkat"
               value={!mqttConnected ? 'MQTT OFF' : !espOnline ? 'ESP32 OFF' : hardwareStatusFresh ? 'ONLINE' : 'Status lama'}
               detail={hardwareStatusFresh ? 'Telemetri ESP32 baru' : 'Menunggu status aktuator terbaru'}
+            />
+            <MetricCard
+              label="Mode Gateway"
+              value={actuatorSnapshot?.mode === 'manual' ? 'MANUAL' : actuatorSnapshot?.mode === 'auto' ? 'OTOMATIS' : '—'}
+              detail="Uji fisik hanya diizinkan pada MANUAL"
             />
             <MetricCard
               label="Relay/pompa nyata"
@@ -698,19 +735,18 @@ export function SimulationPage() {
             />
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-[minmax(160px,220px)_1fr] sm:items-end">
-            <NumberField
-              id="hardware-test-target"
-              label="Target volume uji"
-              value={hardwareTestTarget}
-              onChange={setHardwareTestTarget}
-              unit="L"
-              min={0.2}
-              max={0.5}
-              step={0.05}
-            />
-            <p className="text-sm leading-6 text-slate-600 dark:text-slate-400">
-              Syarat mulai: gateway online, status aktuator terbaru, mode MANUAL, semua relay OFF, dan flow nyata di bawah 0,05 L/menit.
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-800">
+            <p className="font-semibold text-slate-900 dark:text-slate-100">
+              {result === null
+                ? 'Hitung simulasi untuk memeriksa apakah hasil meminta tahap air bersih.'
+                : physicalWaterStage
+                  ? `Hasil simulasi: ${stageLabels[result.actuator.stage]} · target dihitung ${formatValue(result.actuator.targetLiters)} L. Uji fisik memakai ${formatValue(hardwareTargetLiters)} L (batas aman 0,2–0,5 L).`
+                  : `Hasil simulasi: ${stageLabels[result.actuator.stage]} · tahap ini tidak dapat dijalankan sebagai uji air bersih.`}
+            </p>
+            <p className="mt-1 text-slate-600 dark:text-slate-300">
+              Syarat mulai: hasil simulasi meminta irigasi/air bersih aktif, gateway online, mode perangkat MANUAL,
+              semua relay OFF, flow nyata di bawah 0,05 L/menit, dan konfirmasi jalur air aman.
+              Mode otomatis di form hanya memengaruhi perhitungan simulasi; mode Gateway ditampilkan terpisah di atas.
             </p>
           </div>
 
@@ -747,7 +783,7 @@ export function SimulationPage() {
               className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-green-700 px-4 py-2.5 font-semibold text-white transition-colors hover:bg-green-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Play size={17} aria-hidden="true" />
-              {hardwareTestPending ? 'Menghubungi ESP32…' : 'Mulai uji pompa fisik'}
+              {hardwareTestPending ? 'Menghubungi ESP32…' : 'Jalankan hasil simulasi pada pompa'}
             </button>
             {hardwareTestRunning && currentHardwareTestRequestId && (
               <button
@@ -761,6 +797,11 @@ export function SimulationPage() {
               </button>
             )}
           </div>
+          <p className="text-sm text-slate-600 dark:text-slate-300" role="status" aria-live="polite">
+            {hardwareTestBlockedReason
+              ? `Belum siap: ${hardwareTestBlockedReason}`
+              : `Siap menjalankan uji air bersih ${formatValue(hardwareTargetLiters)} L.`}
+          </p>
         </div>
       </SectionCard>
 
@@ -776,6 +817,28 @@ export function SimulationPage() {
               Ulangi tahap
             </button>
           </div>
+
+          <SectionCard title="Data input sensor yang dihitung" description="Nilai lokal yang dipakai untuk menghasilkan ringkasan agregasi, skor, FDRS, guard, dan target aktuator di bawah. Telemetri node fisik tetap berjalan terpisah." icon={<Thermometer size={19} />}>
+            <div className="grid gap-5 md:grid-cols-2">
+              <dl>
+                <Detail label="Node 1 · kelembapan tanah" value={`${form.soil1 || '—'}%`} />
+                <Detail label="Node 1 · suhu udara" value={`${form.temperature1 || '—'} °C`} />
+                <Detail label="Node 1 · kelembapan udara" value={`${form.humidity1 || '—'}% RH`} />
+                <Detail label="Node 2 · kelembapan tanah" value={`${form.soil2 || '—'}%`} />
+                <Detail label="Node 2 · suhu udara" value={`${form.temperature2 || '—'} °C`} />
+                <Detail label="Node 2 · kelembapan udara" value={`${form.humidity2 || '—'}% RH`} />
+              </dl>
+              <dl>
+                <Detail label="Node 3 · status" value={form.node3Online ? 'Online (input simulasi)' : 'Offline / tidak dipakai'} />
+                <Detail label="Node 3 · suhu tanah gambut" value={form.node3Online ? `${form.peatTemperature || '—'} °C` : '—'} />
+                <Detail label="Node 3 · suhu / RH udara" value={form.node3Online ? `${form.node3Temperature || '—'} °C / ${form.node3Humidity || '—'}%` : '—'} />
+                <Detail label="pH larutan" value={form.ph || '—'} />
+                <Detail label="Peluang hujan" value={`${form.rainChance || '—'}%`} />
+                <Detail label="Kecepatan angin" value={`${form.wind || '—'} km/jam`} />
+                <Detail label="Kondisi awal FDRS (FFMC / DMC / DC)" value={`${form.previousFfmc} / ${form.previousDmc} / ${form.previousDc}`} />
+              </dl>
+            </div>
+          </SectionCard>
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <MetricCard label="Soil representatif" value={`${formatValue(result.soilRepresentative)}%`} detail="Gabungan Node 1 & 2; bobot minimum meningkat jika selisih >8%." />

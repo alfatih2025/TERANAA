@@ -15,7 +15,8 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../hooks/useAuthContext';
 import { LogOut } from 'lucide-react';
-import logo from '../assets/teranova-logo.png';
+
+const logo = '/teranova-logo.png';
 
 export type PageId =
   | 'dashboard'
@@ -54,8 +55,8 @@ export function Sidebar({ currentPage, onPageChange }: SidebarProps) {
     <div className="flex h-full flex-col bg-white light-card dark:bg-slate-950 border-r border-slate-200 dark:border-slate-800">
       <div className="flex items-center justify-between gap-3 p-6">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-green-600 dark:bg-blue-600">
-            <img src={logo} alt="TeraNova" className="h-full w-full object-cover" />
+          <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl">
+            <img src={logo} alt="TeraNova" className="h-full w-full object-contain" />
           </div>
           <h1 className="text-xl font-bold text-slate-900 dark:text-white">TeraNova</h1>
         </div>

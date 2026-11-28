@@ -46,6 +46,7 @@ type SimulationForm = {
   timeValid: boolean;
   hour: string;
   minute: string;
+  forceBiologicalWindow: boolean;
   day: string;
   month: string;
   fertilizerInterval: string;
@@ -94,6 +95,7 @@ function makeInitialForm(): SimulationForm {
     timeValid: true,
     hour: String(now.getHours()),
     minute: String(now.getMinutes()),
+    forceBiologicalWindow: false,
     day: String(now.getDate()),
     month: String(now.getMonth() + 1),
     fertilizerInterval: '2',
@@ -362,6 +364,7 @@ export function SimulationPage() {
       timeValid: form.timeValid,
       hour: numberValue(form.hour, 'Jam', 0, 23),
       minute: numberValue(form.minute, 'Menit', 0, 59),
+      forceBiologicalWindow: form.forceBiologicalWindow,
       day: numberValue(form.day, 'Tanggal', 1, 31),
       month: numberValue(form.month, 'Bulan', 1, 12),
       fertilizerIntervalDays: numberValue(form.fertilizerInterval, 'Interval fertigasi', 1, 30),
@@ -635,6 +638,14 @@ export function SimulationPage() {
               <NumberField id="minute" label="Menit" value={form.minute} onChange={(value) => updateForm('minute', value)} unit="0–59" min={0} max={59} />
               <NumberField id="day" label="Tanggal saat ini" value={form.day} onChange={(value) => updateForm('day', value)} unit="hari" min={1} max={31} />
               <NumberField id="month" label="Bulan saat ini" value={form.month} onChange={(value) => updateForm('month', value)} unit="1–12" min={1} max={12} />
+            </div>
+            <div className="mt-4">
+              <CheckField
+                checked={form.forceBiologicalWindow}
+                label="Anggap sebagai jendela biologis (simulasi saja)"
+                description="Override hanya berlaku saat evaluasi simulasi. Jam/tanggal produksi dan jadwal tersimpan dipulihkan; guard hujan, tanah jenuh, pH, dan jam terik tetap berlaku. Jika memilih eksekusi fisik, keputusan simulasi dapat mengaktifkan relay."
+                onChange={(checked) => updateForm('forceBiologicalWindow', checked)}
+              />
             </div>
           </div>
 
@@ -950,7 +961,8 @@ export function SimulationPage() {
                   <dl>
                     <Detail label="Guard hujan / tanah basah" value={`${firmwareSimulationResult.guardRain ? 'BLOKIR' : 'Lolos'} / ${firmwareSimulationResult.guardWetSoil ? 'BLOKIR' : 'Lolos'}`} />
                     <Detail label="Guard jam terik / pH" value={`${firmwareSimulationResult.guardHotHour ? 'BLOKIR' : 'Lolos'} / ${firmwareSimulationResult.guardDangerousPh ? 'BLOKIR' : 'Lolos'}`} />
-                    <Detail label="Interval / jendela biologis" value={`${firmwareSimulationResult.fertilizerIntervalDue ? 'Tercapai' : 'Belum'} / ${firmwareSimulationResult.fertilizerBiologicalWindow ? 'Terbuka' : 'Tertutup'}`} />
+                    <Detail label="Interval fertigasi" value={firmwareSimulationResult.fertilizerIntervalDue ? 'Tercapai' : 'Belum'} />
+                    <Detail label="Jendela biologis aktual / simulasi" value={`${firmwareSimulationResult.realBiologicalWindow ? 'Terbuka' : 'Tertutup'} / ${firmwareSimulationResult.fertilizerBiologicalWindow ? 'Dianggap terbuka' : 'Tertutup'}${firmwareSimulationResult.biologicalWindowOverride ? ' · override aktif' : ''}`} />
                     <Detail label="Hasil guard fertigasi" value={firmwareSimulationResult.fertilizerAllowed ? 'Diizinkan' : firmwareSimulationResult.fertilizerBlockReason ?? 'Tidak diizinkan'} />
                   </dl>
                 </div>
@@ -962,26 +974,29 @@ export function SimulationPage() {
             )}
           </SectionCard>
 
-          <SectionCard title="Input sensor dummy" description="Nilai skenario untuk perhitungan ESP32 dan pembanding lokal. Input ini tidak menjadi telemetri produksi Node 1–3." icon={<Thermometer size={19} />}>
-            <div className="grid gap-5 md:grid-cols-2">
-              <dl>
-                <Detail label="Node 1 · kelembapan tanah" value={`${form.soil1 || '—'}%`} />
-                <Detail label="Node 1 · suhu udara" value={`${form.temperature1 || '—'} °C`} />
-                <Detail label="Node 1 · kelembapan udara" value={`${form.humidity1 || '—'}% RH`} />
-                <Detail label="Node 2 · kelembapan tanah" value={`${form.soil2 || '—'}%`} />
-                <Detail label="Node 2 · suhu udara" value={`${form.temperature2 || '—'} °C`} />
-                <Detail label="Node 2 · kelembapan udara" value={`${form.humidity2 || '—'}% RH`} />
-              </dl>
-              <dl>
-                <Detail label="Node 3 · status" value={form.node3Online ? 'Online (input simulasi)' : 'Offline / tidak dipakai'} />
-                <Detail label="Node 3 · suhu tanah gambut" value={form.node3Online ? `${form.peatTemperature || '—'} °C` : '—'} />
-                <Detail label="Node 3 · suhu / RH udara" value={form.node3Online ? `${form.node3Temperature || '—'} °C / ${form.node3Humidity || '—'}%` : '—'} />
-                <Detail label="pH larutan" value={form.ph || '—'} />
-                <Detail label="Peluang hujan" value={`${form.rainChance || '—'}%`} />
-                <Detail label="Kecepatan angin" value={`${form.wind || '—'} km/jam`} />
-                <Detail label="Kondisi awal FDRS (FFMC / DMC / DC)" value={`${form.previousFfmc} / ${form.previousDmc} / ${form.previousDc}`} />
-              </dl>
-            </div>
+          <SectionCard title="Data dummy yang diterima ESP32" description="Nilai echo dari payload yang benar-benar diproses firmware; ini bukan telemetri sensor produksi." icon={<Thermometer size={19} />}>
+            {firmwareSimulationResult?.dummyInput ? (
+              <div className="grid gap-5 md:grid-cols-2">
+                <dl>
+                  <Detail label="Node 1 · tanah / suhu / RH" value={`${formatValue(firmwareSimulationResult.dummyInput.node1.soil)}% / ${formatValue(firmwareSimulationResult.dummyInput.node1.temperature)} °C / ${formatValue(firmwareSimulationResult.dummyInput.node1.humidity)}%`} />
+                  <Detail label="Node 2 · tanah / suhu / RH" value={`${formatValue(firmwareSimulationResult.dummyInput.node2.soil)}% / ${formatValue(firmwareSimulationResult.dummyInput.node2.temperature)} °C / ${formatValue(firmwareSimulationResult.dummyInput.node2.humidity)}%`} />
+                  <Detail label="Node 3 · status" value={firmwareSimulationResult.dummyInput.node3Online ? 'Online (dummy)' : 'Offline'} />
+                  <Detail label="Node 3 · suhu tanah / udara / RH" value={`${formatValue(firmwareSimulationResult.dummyInput.node3SoilTemp)} °C / ${formatValue(firmwareSimulationResult.dummyInput.node3AmbientTemp)} °C / ${formatValue(firmwareSimulationResult.dummyInput.node3AmbientRh)}%`} />
+                  <Detail label="Hujan / pH / angin" value={`${formatValue(firmwareSimulationResult.dummyInput.rainChance)}% / ${formatValue(firmwareSimulationResult.dummyInput.ph)} / ${formatValue(firmwareSimulationResult.dummyInput.windKmh)} km/jam`} />
+                </dl>
+                <dl>
+                  <Detail label="Waktu simulasi" value={`${firmwareSimulationResult.dummyInput.timeValid ? `${String(firmwareSimulationResult.dummyInput.hour).padStart(2, '0')}:${String(firmwareSimulationResult.dummyInput.minute).padStart(2, '0')}` : 'RTC tidak valid'} · ${String(firmwareSimulationResult.dummyInput.day).padStart(2, '0')}/${String(firmwareSimulationResult.dummyInput.month).padStart(2, '0')}`} />
+                  <Detail label="Fase / mode otomatis" value={`${firmwareSimulationResult.dummyInput.phase} / ${firmwareSimulationResult.dummyInput.automaticMode ? 'aktif' : 'nonaktif'}`} />
+                  <Detail label="Interval / fertigasi terakhir" value={`${firmwareSimulationResult.dummyInput.fertilizerIntervalDays} hari / ${firmwareSimulationResult.dummyInput.lastFertilizerDay}/${firmwareSimulationResult.dummyInput.lastFertilizerMonth}`} />
+                  <Detail label="Override jendela biologis" value={firmwareSimulationResult.dummyInput.forceBiologicalWindow ? 'Aktif · simulasi saja' : 'Tidak aktif'} />
+                  <Detail label="Jadwal irigasi" value={firmwareSimulationResult.dummyInput.scheduleEnabled ? `Aktif · ${firmwareSimulationResult.dummyInput.scheduleTime}` : 'Nonaktif'} />
+                </dl>
+              </div>
+            ) : (
+              <p className="rounded-xl border border-sky-300 bg-sky-50 p-3 text-sm text-sky-950 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-100" role="status">
+                Jalankan Hitung/pratinjau untuk melihat echo input yang diterima ESP32. Nilai form saja belum mengonfirmasi payload diterima.
+              </p>
+            )}
           </SectionCard>
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">

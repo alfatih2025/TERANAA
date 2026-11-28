@@ -36,6 +36,7 @@ function scenario(overrides: Partial<IrrigationSimulationInput> = {}): Irrigatio
     timeValid: true,
     hour: 7,
     minute: 0,
+    forceBiologicalWindow: false,
     day: 10,
     month: 6,
     fertilizerIntervalDays: 2,
@@ -90,6 +91,27 @@ test('fertigation guards block high rain and show the first blocking reason', ()
   assert.equal(result.fertilizer.guards.rain, true);
   assert.equal(result.fertilizer.firstBlockReason, 'Peluang hujan >=60% (cegah leaching)');
   assert.equal(result.actuator.stage, 'IRIGASI');
+});
+
+test('simulation can override the biological window without changing the entered clock time', () => {
+  const result = evaluateIrrigationScenario(scenario({
+    node1: { soil: 44, temperature: 32, humidity: 35 },
+    node2: { soil: 44, temperature: 32, humidity: 35 },
+    hour: 23,
+    minute: 15,
+    day: 27,
+    lastFertilizerDay: 25,
+    lastFertilizerMonth: 6,
+    forceBiologicalWindow: true,
+  }));
+
+  assert.equal(result.fertilizer.intervalDue, true);
+  assert.equal(result.fertilizer.biologicalWindow, true);
+  assert.equal(result.fertilizer.allowed, true);
+  assert.equal(result.actuator.stage, 'PRE_WET');
+  assert.equal(result.fertilizer.preWetLiters, 0.3);
+  assert.ok(Math.abs(result.fertilizer.finalDoseLiters - 0.72) < 1e-9);
+  assert.equal(result.fertilizer.postFlushLiters, 0.25);
 });
 
 test('fertigation flow advances PRE-WET, DOSING, and POST-FLUSH without overlapping relays', () => {

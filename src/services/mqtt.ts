@@ -218,6 +218,8 @@ export interface MqttSimulationSnapshot {
   guardDangerousPh: boolean | null;
   fertilizerIntervalDue: boolean | null;
   fertilizerBiologicalWindow: boolean | null;
+  realBiologicalWindow: boolean | null;
+  biologicalWindowOverride: boolean | null;
   fertilizerAllowed: boolean | null;
   peatAcid: boolean | null;
   fertilizerBaseDoseLiters: number | null;
@@ -228,7 +230,33 @@ export interface MqttSimulationSnapshot {
   fertilizerLiters: number | null;
   postFlushLiters: number | null;
   scheduleDurationSeconds: number | null;
+  dummyInput: MqttSimulationDummyInputSnapshot | null;
   updatedAt: string;
+}
+
+export interface MqttSimulationDummyInputSnapshot {
+  node1: { soil: number | null; temperature: number | null; humidity: number | null };
+  node2: { soil: number | null; temperature: number | null; humidity: number | null };
+  rainChance: number;
+  ph: number;
+  node3Online: boolean;
+  node3SoilTemp: number | null;
+  node3AmbientTemp: number | null;
+  node3AmbientRh: number | null;
+  windKmh: number;
+  phase: string;
+  automaticMode: boolean;
+  timeValid: boolean;
+  hour: number;
+  minute: number;
+  day: number;
+  month: number;
+  fertilizerIntervalDays: number;
+  lastFertilizerDay: number;
+  lastFertilizerMonth: number;
+  forceBiologicalWindow: boolean;
+  scheduleEnabled: boolean;
+  scheduleTime: string;
 }
 
 export interface MqttSimulationProgressSnapshot {
@@ -792,6 +820,106 @@ function parseNumeric(value: unknown): number | null {
   return null;
 }
 
+function parseSimulationDummyInput(value: unknown): MqttSimulationDummyInputSnapshot | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const input = value as Record<string, unknown>;
+  const node1 = input.node1 && typeof input.node1 === 'object' && !Array.isArray(input.node1)
+    ? input.node1 as Record<string, unknown>
+    : null;
+  const node2 = input.node2 && typeof input.node2 === 'object' && !Array.isArray(input.node2)
+    ? input.node2 as Record<string, unknown>
+    : null;
+  const nullableNumber = (record: Record<string, unknown>, field: string) => {
+    const raw = record[field];
+    if (raw === null) return null;
+    return parseNumeric(raw) ?? undefined;
+  };
+  const requiredNumber = (field: string) => parseNumeric(input[field]);
+  const node3Online = parseBoolean(input.node3Online);
+  const timeValid = parseBoolean(input.timeValid);
+  const scheduleEnabled = parseBoolean(input.scheduleEnabled);
+  const automaticMode = parseBoolean(input.automaticMode);
+  const forceBiologicalWindow = input.forceBiologicalWindow === undefined
+    ? false
+    : parseBoolean(input.forceBiologicalWindow);
+  const rainChance = requiredNumber('rainChance');
+  const ph = requiredNumber('ph');
+  const windKmh = requiredNumber('windKmh');
+  const hour = requiredNumber('hour');
+  const minute = requiredNumber('minute');
+  const day = requiredNumber('day');
+  const month = requiredNumber('month');
+  const fertilizerIntervalDays = requiredNumber('fertilizerIntervalDays');
+  const lastFertilizerDay = requiredNumber('lastFertilizerDay');
+  const lastFertilizerMonth = requiredNumber('lastFertilizerMonth');
+
+  if (
+    !node1 ||
+    !node2 ||
+    nullableNumber(node1, 'soil') === undefined ||
+    nullableNumber(node1, 'temperature') === undefined ||
+    nullableNumber(node1, 'humidity') === undefined ||
+    nullableNumber(node2, 'soil') === undefined ||
+    nullableNumber(node2, 'temperature') === undefined ||
+    nullableNumber(node2, 'humidity') === undefined ||
+    nullableNumber(input, 'node3SoilTemp') === undefined ||
+    nullableNumber(input, 'node3AmbientTemp') === undefined ||
+    nullableNumber(input, 'node3AmbientRh') === undefined ||
+    typeof node3Online !== 'boolean' ||
+    typeof automaticMode !== 'boolean' ||
+    typeof timeValid !== 'boolean' ||
+    typeof scheduleEnabled !== 'boolean' ||
+    typeof forceBiologicalWindow !== 'boolean' ||
+    rainChance === null ||
+    ph === null ||
+    windKmh === null ||
+    hour === null ||
+    minute === null ||
+    day === null ||
+    month === null ||
+    fertilizerIntervalDays === null ||
+    lastFertilizerDay === null ||
+    lastFertilizerMonth === null ||
+    typeof input.phase !== 'string' ||
+    typeof input.scheduleTime !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    node1: {
+      soil: nullableNumber(node1, 'soil') ?? null,
+      temperature: nullableNumber(node1, 'temperature') ?? null,
+      humidity: nullableNumber(node1, 'humidity') ?? null,
+    },
+    node2: {
+      soil: nullableNumber(node2, 'soil') ?? null,
+      temperature: nullableNumber(node2, 'temperature') ?? null,
+      humidity: nullableNumber(node2, 'humidity') ?? null,
+    },
+    rainChance,
+    ph,
+    node3Online,
+    node3SoilTemp: nullableNumber(input, 'node3SoilTemp') ?? null,
+    node3AmbientTemp: nullableNumber(input, 'node3AmbientTemp') ?? null,
+    node3AmbientRh: nullableNumber(input, 'node3AmbientRh') ?? null,
+    windKmh,
+    phase: input.phase,
+    automaticMode,
+    timeValid,
+    hour,
+    minute,
+    day,
+    month,
+    fertilizerIntervalDays,
+    lastFertilizerDay,
+    lastFertilizerMonth,
+    forceBiologicalWindow,
+    scheduleEnabled,
+    scheduleTime: input.scheduleTime,
+  };
+}
+
 function parseBoolean(value: unknown): boolean | undefined {
   if (typeof value === 'boolean') return value;
   if (typeof value === 'number') return value !== 0;
@@ -1249,6 +1377,8 @@ function updateFromTopic(topic: string, payload: string) {
       guardDangerousPh: readBoolean('guard_dangerous_ph'),
       fertilizerIntervalDue: readBoolean('fertilizer_interval_due'),
       fertilizerBiologicalWindow: readBoolean('fertilizer_biological_window'),
+      realBiologicalWindow: readBoolean('real_biological_window'),
+      biologicalWindowOverride: readBoolean('biological_window_override'),
       fertilizerAllowed: readBoolean('fertilizer_allowed'),
       peatAcid: readBoolean('peat_acid'),
       fertilizerBaseDoseLiters: parseNumeric(parsed.fertilizer_base_dose_liters),
@@ -1261,6 +1391,7 @@ function updateFromTopic(topic: string, payload: string) {
       fertilizerLiters: parseNumeric(parsed.fertilizer_liters),
       postFlushLiters: parseNumeric(parsed.post_flush_liters),
       scheduleDurationSeconds: parseNumeric(parsed.schedule_duration_seconds),
+      dummyInput: parseSimulationDummyInput(parsed.input),
       updatedAt: now,
     };
     setSnapshot({

@@ -43,6 +43,7 @@ export interface IrrigationSimulationInput {
   timeValid: boolean;
   hour: number;
   minute: number;
+  forceBiologicalWindow: boolean;
   day: number;
   month: number;
   fertilizerIntervalDays: number;
@@ -471,7 +472,8 @@ export function evaluateIrrigationScenario(input: IrrigationSimulationInput): Ir
   }
 
   const due = intervalDue(input);
-  const inWindow = input.timeValid && biologicalWindow(input.hour, input.minute);
+  const inWindow = input.timeValid &&
+    (input.forceBiologicalWindow || biologicalWindow(input.hour, input.minute));
   const peatAcid = input.node3Online && input.ph < 4.8;
   const guards = {
     rain: input.rainChance >= 60,

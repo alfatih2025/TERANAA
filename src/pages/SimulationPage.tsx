@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   Activity,
@@ -18,20 +18,15 @@ import { DEFAULT_SETTINGS, useSettings } from '../context/SettingsContext';
 import { useMqttStatus } from '../hooks/useMqttStatus';
 import {
   createSimulationRequestId,
-  createIrrigationFlowTestRequestId,
   evaluateSimulationOnEsp32,
-  startIrrigationFlowTest,
-  stopIrrigationFlowTest,
+  stopAutomaticSimulationOnEsp32,
 } from '../services/mqtt';
 import type { MqttSimulationSnapshot } from '../services/mqtt';
 import {
-  advanceSimulationFlow,
   evaluateIrrigationScenario,
-  getVirtualRelayOutputs,
   type IrrigationSimulationInput,
   type IrrigationSimulationResult,
   type SimulationPhase,
-  type SimulationStage,
 } from '../lib/irrigationSimulation';
 
 type SimulationForm = {
@@ -258,17 +253,6 @@ function Detail({ label, value }: { label: string; value: string }) {
   );
 }
 
-const stageLabels: Record<SimulationStage, string> = {
-  IDLE: 'IDLE',
-  IRIGASI: 'IRIGASI',
-  JADWAL: 'JADWAL',
-  PRE_WET: 'PRE-WET',
-  INTER_DELAY: 'JEDA ANTAR TAHAP',
-  FERTIGASI: 'DOSING / FERTIGASI',
-  POST_FLUSH_DELAY: 'JEDA POST-FLUSH',
-  POST_FLUSH: 'POST-FLUSH',
-};
-
 function formatValue(value: number | null | undefined, digits = 2) {
   return value == null ? '—' : value.toFixed(digits);
 }
@@ -280,7 +264,6 @@ export function SimulationPage() {
     espOnline,
     mqttConnected,
     sensorSnapshot,
-    irrigationFlowTestSnapshot,
     simulationSnapshot,
   } = useMqttStatus();
   const settings = storedSettings ?? DEFAULT_SETTINGS;
@@ -289,14 +272,16 @@ export function SimulationPage() {
   const [result, setResult] = useState<IrrigationSimulationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [simulationRequestId, setSimulationRequestId] = useState<string | null>(null);
+  const [firmwarePreviewResult, setFirmwarePreviewResult] = useState<MqttSimulationSnapshot | null>(null);
+  const [previewInput, setPreviewInput] = useState<IrrigationSimulationInput | null>(null);
+  const previewRequestIdRef = useRef<string | null>(null);
   const [firmwareSimulationPending, setFirmwareSimulationPending] = useState(false);
   const [firmwareSimulationError, setFirmwareSimulationError] = useState<string | null>(null);
-  const [flowPulses, setFlowPulses] = useState('450');
-  const [flowSeconds, setFlowSeconds] = useState('10');
-  const [hardwareTestConfirmed, setHardwareTestConfirmed] = useState(false);
-  const [hardwareTestRequestId, setHardwareTestRequestId] = useState<string | null>(null);
-  const [hardwareTestPending, setHardwareTestPending] = useState(false);
-  const [hardwareTestError, setHardwareTestError] = useState<string | null>(null);
+  const [physicalExecutionRequestId, setPhysicalExecutionRequestId] = useState<string | null>(null);
+  const [physicalExecutionResult, setPhysicalExecutionResult] = useState<MqttSimulationSnapshot | null>(null);
+  const [physicalExecutionConfirmed, setPhysicalExecutionConfirmed] = useState(false);
+  const [physicalStopPending, setPhysicalStopPending] = useState(false);
+  const [physicalStopError, setPhysicalStopError] = useState<string | null>(null);
 
   const phase = phaseChoice === 'settings' ? settings.plant_phase : phaseChoice;
   const scheduleEnabled = form.scheduleEnabled ?? settings.watering_enabled;
@@ -306,7 +291,13 @@ export function SimulationPage() {
     setResult(null);
     setError(null);
     setSimulationRequestId(null);
+    previewRequestIdRef.current = null;
+    setFirmwarePreviewResult(null);
+    setPreviewInput(null);
     setFirmwareSimulationError(null);
+    setPhysicalExecutionRequestId(null);
+    setPhysicalExecutionResult(null);
+    setPhysicalExecutionConfirmed(false);
   };
 
   const makeInput = (): IrrigationSimulationInput => {
@@ -384,9 +375,18 @@ export function SimulationPage() {
       setResult(evaluateIrrigationScenario(input));
       const requestId = createSimulationRequestId();
       setSimulationRequestId(requestId);
+      previewRequestIdRef.current = requestId;
+      setFirmwarePreviewResult(null);
+      setPreviewInput(input);
+      setPhysicalExecutionRequestId(null);
+      setPhysicalExecutionResult(null);
+      setPhysicalExecutionConfirmed(false);
       setFirmwareSimulationPending(true);
       requestStarted = true;
-      await evaluateSimulationOnEsp32(requestId, input);
+      const preview = await evaluateSimulationOnEsp32(requestId, input);
+      if (previewRequestIdRef.current === requestId) {
+        setFirmwarePreviewResult(preview);
+      }
     } catch (cause) {
       if (!requestStarted) {
         setResult(null);
@@ -405,144 +405,93 @@ export function SimulationPage() {
     setResult(null);
     setError(null);
     setSimulationRequestId(null);
+    previewRequestIdRef.current = null;
+    setFirmwarePreviewResult(null);
+    setPreviewInput(null);
     setFirmwareSimulationError(null);
-    setFlowPulses('450');
-    setFlowSeconds('10');
+    setPhysicalExecutionRequestId(null);
+    setPhysicalExecutionResult(null);
+    setPhysicalExecutionConfirmed(false);
+    setPhysicalStopError(null);
   };
 
-  const advanceFlow = () => {
-    if (!result) return;
-    try {
-      if (result.actuator.stage === 'INTER_DELAY' || result.actuator.stage === 'POST_FLUSH_DELAY') {
-        setResult(advanceSimulationFlow(result, 0, 3));
-        setError(null);
-        return;
-      }
-      const pulses = numberValue(flowPulses, 'Pulsa flow', 0, 2_000_000);
-      if (!Number.isInteger(pulses)) throw new Error('Pulsa flow harus bilangan bulat.');
-      const seconds = numberValue(flowSeconds, 'Durasi flow', 0.01, 1_800);
-      setResult(advanceSimulationFlow(result, pulses, seconds));
-      setError(null);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Data flow tidak valid.');
-    }
-  };
-
-  const resetStage = () => {
-    if (!result) return;
-    try {
-      setResult(evaluateIrrigationScenario(makeInput()));
-      setError(null);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Tidak dapat mengulang simulasi.');
-    }
-  };
-
-  const relayOutputs = result ? getVirtualRelayOutputs(result.actuator.stage) : null;
-  const isInterStageDelay = result?.actuator.stage === 'INTER_DELAY' || result?.actuator.stage === 'POST_FLUSH_DELAY';
-  const stageProgress = result?.actuator.stage === 'JADWAL'
-    ? Math.min(1, result.actuator.elapsedSeconds / result.actuator.scheduleDurationSeconds)
-    : isInterStageDelay
-      ? Math.min(1, result.actuator.elapsedSeconds / 3)
-      : result && result.actuator.targetLiters > 0
-        ? Math.min(1, result.actuator.stageLiters / result.actuator.targetLiters)
-        : 0;
-  const anyRelayActive = relayOutputs !== null &&
-    (relayOutputs.irrigation || relayOutputs.fertilizer || relayOutputs.pump);
-  const hardwareStatusFresh = espOnline && actuatorSnapshot?.updatedAt != null;
-  const realFlowRate = actuatorSnapshot?.flowRate ?? sensorSnapshot?.flow_rate ?? null;
-  const activeHardwareTestRequestId = irrigationFlowTestSnapshot?.state === 'started' &&
-    actuatorSnapshot?.pompa !== false
-    ? irrigationFlowTestSnapshot.requestId
-    : null;
-  const currentHardwareTestRequestId = hardwareTestRequestId ?? activeHardwareTestRequestId;
-  const hardwareTestSnapshot = irrigationFlowTestSnapshot?.requestId === currentHardwareTestRequestId
-    ? irrigationFlowTestSnapshot
-    : null;
-  const hardwareTestRunning = hardwareTestSnapshot?.state === 'started' &&
-    actuatorSnapshot?.pompa !== false;
-  const firmwareSimulationResult: MqttSimulationSnapshot | null =
-    simulationRequestId !== null &&
-    simulationSnapshot?.requestId === simulationRequestId &&
-    simulationSnapshot.state === 'evaluated'
-      ? simulationSnapshot
-      : null;
-  const firmwareSimulationStatus = simulationRequestId !== null &&
-    simulationSnapshot?.requestId === simulationRequestId
-    ? simulationSnapshot
-    : null;
-  const physicalWaterStage = firmwareSimulationResult !== null &&
-    ['IRIGASI', 'PRE_WET'].includes(firmwareSimulationResult.stage ?? '') &&
-    firmwareSimulationResult.pumpPredicted === true;
-  const hardwareTargetLiters = physicalWaterStage && firmwareSimulationResult
-    ? Math.min(0.5, Math.max(0.2, firmwareSimulationResult.targetLiters ?? 0))
-    : 0;
-  const hardwareTargetValid = hardwareTargetLiters >= 0.2 && hardwareTargetLiters <= 0.5;
+  const hardwareStatusFresh = espOnline &&
+    actuatorSnapshot?.updatedAt != null;
+  const realFlowRate = actuatorSnapshot?.flowRate ?? null;
   const hardwareActuatorsIdle = actuatorSnapshot?.irigasi === false &&
     actuatorSnapshot.fertigasi === false &&
     actuatorSnapshot.pompa === false;
-  const canStartHardwareTest = mqttConnected &&
+  const previewRequestsPhysicalAction = firmwarePreviewResult?.pumpPredicted === true &&
+    firmwarePreviewResult.stage !== 'JADWAL';
+  const canExecutePhysicalSimulation = mqttConnected &&
     espOnline &&
     hardwareStatusFresh &&
-    actuatorSnapshot?.mode === 'manual' &&
+    actuatorSnapshot?.mode === 'auto' &&
+    form.automaticMode &&
+    previewInput !== null &&
+    previewRequestsPhysicalAction &&
     hardwareActuatorsIdle &&
     realFlowRate !== null &&
     realFlowRate < 0.05 &&
-    hardwareTargetValid &&
-    physicalWaterStage &&
-    hardwareTestConfirmed &&
-    !hardwareTestPending &&
-    !hardwareTestRunning;
-  const hardwareTestBlockedReason = hardwareTestPending
-    ? 'Perintah sedang diproses.'
-    : hardwareTestRunning
-      ? 'Uji fisik sedang berjalan; gunakan tombol berhenti.'
-      : !physicalWaterStage
-        ? 'Hitung hasil simulasi yang meminta tahap IRIGASI, PRE-WET, atau POST-FLUSH.'
-        : !mqttConnected
-          ? 'MQTT web belum terhubung.'
-          : !espOnline
-            ? 'Gateway ESP32 belum online.'
-            : !hardwareStatusFresh
-              ? 'Menunggu status aktuator terbaru dari ESP32.'
-              : actuatorSnapshot?.mode !== 'manual'
-                ? 'Ubah mode Gateway ke MANUAL.'
-                : !hardwareActuatorsIdle
-                  ? 'Matikan aktuator yang sedang aktif sebelum uji.'
-                  : realFlowRate === null
-                    ? 'Menunggu pembacaan flowmeter nyata.'
-                    : realFlowRate >= 0.05
-                      ? 'Flowmeter masih mendeteksi aliran; tunggu hingga berhenti.'
-                      : !hardwareTestConfirmed
-                        ? 'Centang konfirmasi jalur air bersih dan keluaran aman.'
-                        : null;
-
-  const startHardwarePumpTest = async () => {
-    if (!canStartHardwareTest) return;
-    const requestId = createIrrigationFlowTestRequestId();
-    setHardwareTestRequestId(requestId);
-    setHardwareTestError(null);
-    setHardwareTestConfirmed(false);
-    setHardwareTestPending(true);
+    physicalExecutionConfirmed &&
+    !firmwareSimulationPending;
+  const canStopPhysicalSimulation = mqttConnected &&
+    (actuatorSnapshot?.irigasi === true ||
+      actuatorSnapshot?.fertigasi === true ||
+      actuatorSnapshot?.pompa === true) &&
+    !physicalStopPending;
+  const firmwareSimulationResult = firmwarePreviewResult;
+  const firmwareSimulationStatus = simulationRequestId !== null &&
+    simulationSnapshot?.requestId === simulationRequestId
+    ? simulationSnapshot
+    : firmwarePreviewResult;
+  const firmwareExecutionStatus = physicalExecutionRequestId !== null &&
+    simulationSnapshot?.requestId === physicalExecutionRequestId
+    ? simulationSnapshot
+    : physicalExecutionResult;
+  const executePhysicalSimulation = async () => {
+    if (!canExecutePhysicalSimulation || !previewInput) return;
+    setFirmwareSimulationError(null);
+    setPhysicalExecutionConfirmed(false);
+    setPhysicalStopError(null);
+    const requestId = createSimulationRequestId();
+    setPhysicalExecutionRequestId(requestId);
+    setPhysicalExecutionResult(null);
+    setFirmwareSimulationPending(true);
     try {
-      await startIrrigationFlowTest(requestId, hardwareTargetLiters);
+      const response = await evaluateSimulationOnEsp32(requestId, previewInput, 'EXECUTE');
+      setPhysicalExecutionResult(response);
     } catch (cause) {
-      setHardwareTestError(cause instanceof Error ? cause.message : 'Uji pompa tidak dapat dimulai.');
+      setFirmwareSimulationError(cause instanceof Error
+        ? cause.message
+        : 'Eksekusi otomatis fisik tidak dapat dimulai.');
     } finally {
-      setHardwareTestPending(false);
+      setFirmwareSimulationPending(false);
     }
   };
-
-  const stopHardwarePumpTest = async () => {
-    if (!currentHardwareTestRequestId || hardwareTestPending) return;
-    setHardwareTestError(null);
-    setHardwareTestPending(true);
+  const updatePhaseChoice = (next: 'settings' | SimulationPhase) => {
+    setPhaseChoice(next);
+    setResult(null);
+    setSimulationRequestId(null);
+    previewRequestIdRef.current = null;
+    setFirmwarePreviewResult(null);
+    setPreviewInput(null);
+    setPhysicalExecutionRequestId(null);
+    setPhysicalExecutionResult(null);
+    setPhysicalExecutionConfirmed(false);
+  };
+  const stopPhysicalSimulation = async () => {
+    if (!canStopPhysicalSimulation) return;
+    setPhysicalStopError(null);
+    setPhysicalStopPending(true);
     try {
-      await stopIrrigationFlowTest(currentHardwareTestRequestId);
+      const response = await stopAutomaticSimulationOnEsp32(createSimulationRequestId());
+      setPhysicalExecutionRequestId(response.requestId);
+      setPhysicalExecutionResult(response);
     } catch (cause) {
-      setHardwareTestError(cause instanceof Error ? cause.message : 'Perintah berhenti tidak dapat dikirim.');
+      setPhysicalStopError(cause instanceof Error ? cause.message : 'Perintah berhenti tidak dapat dikirim.');
     } finally {
-      setHardwareTestPending(false);
+      setPhysicalStopPending(false);
     }
   };
 
@@ -556,23 +505,22 @@ export function SimulationPage() {
           <div>
             <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Simulasi Kontrol</h1>
             <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-                Kirim input dummy ke ESP32 untuk mengevaluasi logika kontrol tanpa mengubah telemetri sensor asli atau relay fisik.
+                Hitung skenario dummy di ESP32, lalu jalankan hasilnya melalui mode OTOMATIS dan relay fisik.
             </p>
           </div>
         </div>
         <span className="inline-flex min-h-10 items-center gap-2 self-start rounded-full bg-green-100 px-3 py-2 text-sm font-semibold text-green-800 dark:bg-green-500/15 dark:text-green-200">
           <ShieldCheck size={16} aria-hidden="true" />
-          Dry-run ESP32 · relay fisik tetap aman
+          ESP32 · aktuator fisik OTOMATIS
         </span>
       </header>
 
       <div className="flex items-start gap-3 rounded-2xl border border-green-300 bg-green-50 p-4 text-sm leading-6 text-green-950 dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-100">
         <CheckCircle2 className="mt-0.5 shrink-0" size={19} aria-hidden="true" />
         <p>
-            Input dummy dikirim melalui topik simulasi khusus dan dihitung oleh logika firmware ESP32.
-            Input ini tidak dipublikasikan sebagai telemetri Node 1–3 dan hanya menghasilkan pratinjau aktuator;
-            relay fisik tidak berubah. Data sensor nyata tetap berjalan terpisah. Uji pompa air bersih tetap memerlukan
-            konfirmasi khusus serta dibatasi flowmeter nyata.
+            Tahap hitung hanya menghasilkan pratinjau dan tidak mengubah relay. Eksekusi fisik memerlukan konfirmasi,
+            Gateway OTOMATIS, semua relay mati, dan flowmeter nyata menunjukkan aliran nol. Input dummy tidak masuk
+            ke telemetri Node 1–3; selama aktuator berjalan, cutoff volume/no-flow tetap berasal dari flowmeter fisik.
         </p>
       </div>
 
@@ -585,7 +533,7 @@ export function SimulationPage() {
       {firmwareSimulationError && (
         <div className="flex items-start gap-2 rounded-2xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100" role="alert" aria-live="assertive">
           <AlertTriangle className="mt-0.5 shrink-0" size={17} aria-hidden="true" />
-          <span>Hasil lokal tersedia, tetapi evaluasi firmware ESP32 gagal: {firmwareSimulationError}</span>
+          <span>Proses firmware ESP32 gagal: {firmwareSimulationError}</span>
         </div>
       )}
 
@@ -625,7 +573,7 @@ export function SimulationPage() {
           <NumberField id="solution-ph" label="pH larutan tandon" value={form.ph} onChange={(value) => updateForm('ph', value)} unit="pH" min={0} max={14} step={0.1} />
           <div>
             <label htmlFor="phase-choice" className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-200">Fase tanaman</label>
-            <select id="phase-choice" value={phaseChoice} onChange={(event) => setPhaseChoice(event.target.value as 'settings' | SimulationPhase)} className={fieldClassName}>
+            <select id="phase-choice" value={phaseChoice} onChange={(event) => updatePhaseChoice(event.target.value as 'settings' | SimulationPhase)} className={fieldClassName}>
               <option value="settings">Ikuti pengaturan web ({settings.plant_phase})</option>
               <option value="vegetatif">Vegetatif</option>
               <option value="generatif">Generatif</option>
@@ -709,8 +657,8 @@ export function SimulationPage() {
               <NumberField id="humidity-low-threshold" label="Ambang RH rendah" value={form.lowHumidityThreshold} onChange={(value) => updateForm('lowHumidityThreshold', value)} unit="%" min={0} max={100} placeholder={String(settings.humidity_threshold_low)} />
               <CheckField checked={form.automaticMode} label="Mode OTOMATIS" description="Jika tidak aktif, evaluasi otomatis dilewati." onChange={(checked) => updateForm('automaticMode', checked)} />
               <CheckField checked={form.previousCycleActive} label="Siklus skor sebelumnya aktif" onChange={(checked) => updateForm('previousCycleActive', checked)} />
-              <CheckField checked={form.irrigationCooldownReady} label="Cooldown irigasi selesai" onChange={(checked) => updateForm('irrigationCooldownReady', checked)} />
-              <CheckField checked={form.fireCooldownReady} label="Cooldown Karhutla selesai" onChange={(checked) => updateForm('fireCooldownReady', checked)} />
+              <CheckField checked={form.irrigationCooldownReady} label="Cooldown irigasi selesai (pratinjau)" description="Eksekusi fisik tetap memakai cooldown aktual ESP32." onChange={(checked) => updateForm('irrigationCooldownReady', checked)} />
+              <CheckField checked={form.fireCooldownReady} label="Cooldown Karhutla selesai (pratinjau)" description="Eksekusi fisik tetap memakai cooldown aktual ESP32." onChange={(checked) => updateForm('fireCooldownReady', checked)} />
             </div>
           </div>
 
@@ -729,36 +677,42 @@ export function SimulationPage() {
         </div>
       </details>
 
-      <div className="flex flex-col gap-3 sm:flex-row">
-        <button
-          type="button"
-          onClick={runSimulation}
-          disabled={firmwareSimulationPending}
-          className="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-green-700 px-5 py-3 font-bold text-white transition-colors hover:bg-green-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <Play size={18} aria-hidden="true" />
-          {firmwareSimulationPending ? 'Menunggu hasil ESP32…' : 'Hitung & kirim input ke ESP32'}
-        </button>
-        <button
-          type="button"
-          onClick={resetSimulation}
-          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-5 py-3 font-semibold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-        >
-          <RotateCcw size={17} aria-hidden="true" />
-          Reset
-        </button>
+      <div className="space-y-2">
+        <p className="text-sm leading-6 text-slate-600 dark:text-slate-400">
+          Hitung dulu agar seluruh kalkulasi ESP32 dapat diperiksa. Tombol hitung tidak menyalakan relay; eksekusi nyata
+          dilakukan terpisah setelah hasil dipastikan dan kotak konfirmasi dicentang.
+        </p>
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <button
+            type="button"
+            onClick={runSimulation}
+            disabled={firmwareSimulationPending}
+            className="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-green-700 px-5 py-3 font-bold text-white transition-colors hover:bg-green-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Play size={18} aria-hidden="true" />
+            {firmwareSimulationPending ? 'ESP32 sedang memproses…' : 'Kirim data dummy & hitung (relay tetap OFF)'}
+          </button>
+          <button
+            type="button"
+            onClick={resetSimulation}
+            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-5 py-3 font-semibold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+          >
+            <RotateCcw size={17} aria-hidden="true" />
+            Reset
+          </button>
+        </div>
       </div>
 
       <SectionCard
-        title="Uji pompa nyata · air saja"
-        description="Menjalankan keluaran tahap irigasi air bersih dari hasil simulasi sebagai uji fisik terbatas. Tidak mengubah data node atau menjalankan dosing pupuk."
+        title="Eksekusi sistem otomatis fisik"
+        description="Jalankan keputusan logika firmware menggunakan input dummy. Relay dan cutoff memakai hardware/flowmeter nyata."
         icon={<ShieldCheck size={19} />}
       >
         <div className="space-y-4">
           <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm leading-6 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
-            Uji hanya dengan jalur air bersih, buang aliran ke area aman, dan pastikan tidak ada pupuk/larutan kimia.
-            Target uji dibatasi 0,2–0,5 L. ESP32 mematikan relay saat target flowmeter nyata tercapai, jika tidak ada flow selama 8 detik,
-            atau setelah 30 detik. Dosing fertigasi dan jadwal berbasis waktu tidak dijalankan sebagai uji fisik.
+            Eksekusi dapat membuka jalur irigasi maupun fertigasi sesuai keputusan otomatis, termasuk siklus rewetting/amelioran.
+            Pastikan sumber air/larutan, pipa, dan area keluaran aman. Target mengikuti hasil firmware; flowmeter nyata menjadi
+            cutoff volume, dengan proteksi no-flow dan timeout otomatis. Jadwal berbasis durasi tidak dijalankan dari uji dummy.
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -770,12 +724,12 @@ export function SimulationPage() {
             <MetricCard
               label="Mode Gateway"
               value={actuatorSnapshot?.mode === 'manual' ? 'MANUAL' : actuatorSnapshot?.mode === 'auto' ? 'OTOMATIS' : '—'}
-              detail="Uji fisik hanya diizinkan pada MANUAL"
+              detail="Eksekusi dummy hanya diizinkan pada OTOMATIS"
             />
             <MetricCard
-              label="Relay/pompa nyata"
-              value={actuatorSnapshot?.pompa === true ? 'ON' : actuatorSnapshot?.pompa === false ? 'OFF' : '—'}
-              detail={actuatorSnapshot?.activeValve ?? 'Belum ada status aktuator'}
+              label="Relay irigasi / fertigasi"
+              value={`${actuatorSnapshot?.irigasi === true ? 'ON' : actuatorSnapshot?.irigasi === false ? 'OFF' : '—'} / ${actuatorSnapshot?.fertigasi === true ? 'ON' : actuatorSnapshot?.fertigasi === false ? 'OFF' : '—'}`}
+              detail={`${actuatorSnapshot?.activeValve ?? 'Belum ada status'} · target ${formatValue(actuatorSnapshot?.targetLiters)} L · pompa ${actuatorSnapshot?.pompa === true ? 'ON' : actuatorSnapshot?.pompa === false ? 'OFF' : '—'}`}
             />
             <MetricCard
               label="Flow nyata ESP32"
@@ -785,73 +739,80 @@ export function SimulationPage() {
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-800">
-            <p className="font-semibold text-slate-900 dark:text-slate-100">
-              {!firmwareSimulationResult
-                  ? firmwareSimulationPending
-                    ? 'Menunggu evaluasi logika dari ESP32…'
-                    : 'Kirim input simulasi ke ESP32 untuk mengetahui apakah hasilnya meminta tahap air bersih.'
-                  : physicalWaterStage
-                    ? `Hasil ESP32: ${firmwareSimulationResult.stage} · target ${formatValue(firmwareSimulationResult.targetLiters)} L. Uji fisik memakai ${formatValue(hardwareTargetLiters)} L (batas aman 0,2–0,5 L).`
-                    : `Hasil ESP32: ${firmwareSimulationResult.stage ?? 'IDLE'} · tahap ini tidak dapat dijalankan sebagai uji air bersih.`}
-            </p>
-            <p className="mt-1 text-slate-600 dark:text-slate-300">
-              Syarat mulai: hasil ESP32 meminta IRIGASI atau PRE-WET aktif, gateway online, mode perangkat MANUAL,
-              semua relay OFF, flow nyata di bawah 0,05 L/menit, dan konfirmasi jalur air aman.
-              Input otomatis di form hanya memengaruhi evaluasi dry-run; mode Gateway ditampilkan terpisah di atas.
-            </p>
+            <p className="font-semibold text-slate-900 dark:text-slate-100">Status hasil firmware dan aktuator nyata</p>
+            <dl className="mt-2">
+              <Detail label="Pratinjau otomatis" value={firmwareSimulationResult ? `${firmwareSimulationResult.stage ?? 'IDLE'} · ${firmwareSimulationResult.priority ?? 'tanpa prioritas'}` : 'Belum dihitung'} />
+              <Detail label="Hasil eksekusi" value={firmwareExecutionStatus ? `${firmwareExecutionStatus.stage ?? 'IDLE'} · ${firmwareExecutionStatus.executionState ?? firmwareExecutionStatus.state} · ${firmwareExecutionStatus.message}` : 'Belum dijalankan'} />
+              <Detail label="Flowmeter aktual" value={realFlowRate === null ? 'Belum ada pembacaan' : `${formatValue(realFlowRate)} L/menit`} />
+            </dl>
           </div>
 
           <CheckField
-            checked={hardwareTestConfirmed}
-            label="Saya sudah memastikan jalur hanya berisi air bersih dan area keluaran aman."
-            description="Konfirmasi ini wajib untuk setiap uji; simulasi virtual tidak ikut menyalakan relay."
-            onChange={setHardwareTestConfirmed}
+            checked={physicalExecutionConfirmed}
+            label="Saya memastikan aktuator fisik, jalur air dan larutan, serta area keluaran aman untuk eksekusi otomatis."
+            description="Konfirmasi diwajibkan ulang setiap eksekusi. Siklus fertigasi dapat membuka katup larutan; hasil input dummy dapat menyalakan relay nyata."
+            onChange={setPhysicalExecutionConfirmed}
           />
 
-          {hardwareTestError && (
+          {firmwareSimulationError && (
             <p className="rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200" role="alert">
-              {hardwareTestError}
+              {firmwareSimulationError}
             </p>
           )}
-
-          {hardwareTestSnapshot && (
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-800" role="status" aria-live="polite">
-              <p className="font-semibold text-slate-900 dark:text-slate-100">
-                Status uji: {hardwareTestSnapshot.state.toUpperCase()} · {hardwareTestSnapshot.message}
-              </p>
-              <p className="mt-1 text-slate-600 dark:text-slate-300">
-                Flowmeter nyata: {formatValue(hardwareTestSnapshot.currentLiters)} / {formatValue(hardwareTestSnapshot.targetLiters)} L
-                {' · '}debit {formatValue(hardwareTestSnapshot.flowRate)} L/menit
-              </p>
-            </div>
+          {physicalStopError && (
+            <p className="rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200" role="alert">
+              {physicalStopError}
+            </p>
           )}
 
           <div className="flex flex-col gap-3 sm:flex-row">
             <button
               type="button"
-              onClick={startHardwarePumpTest}
-              disabled={!canStartHardwareTest}
+              onClick={executePhysicalSimulation}
+              disabled={!canExecutePhysicalSimulation}
               className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-green-700 px-4 py-2.5 font-semibold text-white transition-colors hover:bg-green-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Play size={17} aria-hidden="true" />
-              {hardwareTestPending ? 'Menghubungi ESP32…' : 'Jalankan hasil simulasi pada pompa'}
+              {firmwareSimulationPending ? 'Menghubungi ESP32…' : 'Jalankan hasil di aktuator fisik'}
             </button>
-            {hardwareTestRunning && currentHardwareTestRequestId && (
+            {!hardwareActuatorsIdle && (
               <button
                 type="button"
-                onClick={stopHardwarePumpTest}
-                disabled={hardwareTestPending}
+                onClick={stopPhysicalSimulation}
+                disabled={!canStopPhysicalSimulation}
                 className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-red-300 bg-red-50 px-4 py-2.5 font-semibold text-red-800 transition-colors hover:bg-red-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200 dark:hover:bg-red-500/20"
               >
                 <AlertTriangle size={17} aria-hidden="true" />
-                Hentikan uji sekarang
+                {physicalStopPending ? 'Menghentikan…' : '                Hentikan irigasi/fertigasi'}
               </button>
             )}
           </div>
           <p className="text-sm text-slate-600 dark:text-slate-300" role="status" aria-live="polite">
-            {hardwareTestBlockedReason
-              ? `Belum siap: ${hardwareTestBlockedReason}`
-              : `Siap menjalankan uji air bersih ${formatValue(hardwareTargetLiters)} L.`}
+            {!mqttConnected
+              ? 'Belum siap: MQTT web belum terhubung.'
+              : !espOnline
+                ? 'Belum siap: Gateway ESP32 belum online.'
+                : !hardwareStatusFresh
+                  ? 'Belum siap: status aktuator ESP32 sudah kedaluwarsa.'
+                  : actuatorSnapshot?.mode !== 'auto'
+                    ? 'Belum siap: ubah mode Gateway menjadi OTOMATIS.'
+                    : !form.automaticMode
+                      ? 'Belum siap: aktifkan Mode OTOMATIS pada input skenario.'
+                      : !firmwareSimulationResult
+                        ? 'Hitung skenario terlebih dahulu; hasil pratinjau tidak menyalakan relay.'
+                        : firmwareSimulationResult.stage === 'JADWAL'
+                          ? 'Eksekusi diblokir: hasil berupa jadwal berbasis durasi, bukan siklus cutoff volume flowmeter.'
+                          : !previewRequestsPhysicalAction
+                            ? 'Hasil pratinjau tidak meminta aktuator menyala.'
+                            : !hardwareActuatorsIdle
+                              ? 'Belum siap: semua relay/pompa harus OFF.'
+                              : realFlowRate === null
+                                ? 'Belum siap: menunggu pembacaan flowmeter nyata.'
+                                : realFlowRate >= 0.05
+                                  ? 'Belum siap: flowmeter nyata masih mendeteksi aliran.'
+                                  : !physicalExecutionConfirmed
+                                    ? 'Centang konfirmasi keselamatan sebelum menjalankan aktuator fisik.'
+                                    : 'Interlock terpenuhi. Eksekusi tetap menggunakan cooldown dan cutoff flowmeter aktual ESP32.'}
           </p>
         </div>
       </SectionCard>
@@ -864,14 +825,11 @@ export function SimulationPage() {
               <h2 id="simulation-results" className="text-lg font-bold text-green-950 dark:text-green-100">Pembanding lokal: {result.priority}</h2>
               <p className="mt-1 text-sm leading-6 text-green-900 dark:text-green-100">{result.action}</p>
             </div>
-            <button type="button" onClick={resetStage} className="min-h-10 shrink-0 rounded-xl border border-green-700/30 px-3 text-sm font-semibold text-green-900 hover:bg-green-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-700 dark:text-green-100 dark:hover:bg-green-500/20">
-            Ulangi simulasi lokal
-            </button>
           </div>
 
           <SectionCard
-            title="Hasil evaluasi firmware ESP32"
-            description="Hasil ini berasal dari evaluator firmware produksi dengan input dummy sementara. Tidak ada relay fisik yang diaktifkan."
+            title="Pratinjau hasil firmware ESP32"
+            description="Dihitung oleh firmware tanpa mengubah relay. Jalankan terpisah setelah memeriksa hasil dan interlock."
             icon={<Gauge size={19} />}
           >
             {!firmwareSimulationStatus || firmwareSimulationStatus.state === 'queued' ? (
@@ -885,7 +843,7 @@ export function SimulationPage() {
                     Prioritas: {firmwareSimulationResult.priority ?? '—'} · keputusan: {firmwareSimulationResult.decision ?? '—'}
                   </p>
                   <p className="mt-1 text-green-900 dark:text-green-100">
-                    Tahap {firmwareSimulationResult.stage ?? 'IDLE'} · irigasi {firmwareSimulationResult.irrigationPredicted ? 'aktif' : 'tidak aktif'} · siklus fertigasi {firmwareSimulationResult.fertilizerCyclePredicted ? 'direncanakan' : 'tidak aktif'} · pompa diprediksi {firmwareSimulationResult.pumpPredicted ? 'ON' : 'OFF'} · relay fisik tidak berubah.
+                    Prediksi tahap {firmwareSimulationResult.stage ?? 'IDLE'} · irigasi {firmwareSimulationResult.irrigationPredicted ? 'diminta' : 'tidak diminta'} · siklus fertigasi {firmwareSimulationResult.fertilizerCyclePredicted ? 'direncanakan' : 'tidak aktif'} · pompa {firmwareSimulationResult.pumpPredicted ? 'akan diminta ON' : 'tetap OFF'} · pratinjau tidak menyalakan relay.
                   </p>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -931,7 +889,7 @@ export function SimulationPage() {
             )}
           </SectionCard>
 
-          <SectionCard title="Input sensor dummy" description="Nilai skenario yang dikirim ke ESP32 untuk dry-run dan juga dihitung lokal sebagai pembanding. Telemetri node fisik tetap berjalan terpisah." icon={<Thermometer size={19} />}>
+          <SectionCard title="Input sensor dummy" description="Nilai skenario untuk perhitungan ESP32 dan pembanding lokal. Input ini tidak menjadi telemetri produksi Node 1–3." icon={<Thermometer size={19} />}>
             <div className="grid gap-5 md:grid-cols-2">
               <dl>
                 <Detail label="Node 1 · kelembapan tanah" value={`${form.soil1 || '—'}%`} />
@@ -1034,65 +992,6 @@ export function SimulationPage() {
               </ol>
             </SectionCard>
           </div>
-
-          <SectionCard title="Aktuator virtual & progres flow" description="Pulsa flow memajukan state lokal; interlock dan urutan tahap ditampilkan tanpa kendali hardware." icon={<Gauge size={19} />}>
-            <div className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)]">
-              <div className="space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">State virtual</p>
-                    <p className="mt-1 text-xl font-bold text-slate-900 dark:text-slate-100">{stageLabels[result.actuator.stage]}</p>
-                  </div>
-                  <span className={`rounded-full px-3 py-1.5 text-sm font-semibold ${anyRelayActive ? 'bg-blue-100 text-blue-800 dark:bg-blue-500/15 dark:text-blue-200' : 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100'}`}>
-                    {anyRelayActive ? 'Relay virtual aktif' : 'Semua relay virtual OFF'}
-                  </span>
-                </div>
-                <p className="text-sm leading-6 text-slate-600 dark:text-slate-400">{result.actuator.resultMessage}</p>
-                {(result.actuator.targetLiters > 0 || result.actuator.stage === 'JADWAL' || isInterStageDelay) && (
-                  <>
-                    <label htmlFor="stage-progress" className="block text-sm font-medium text-slate-700 dark:text-slate-200">
-                      {isInterStageDelay
-                        ? `Progres jeda: ${result.actuator.elapsedSeconds.toFixed(1)} / 3 detik`
-                        : result.actuator.stage === 'JADWAL'
-                          ? `Durasi: ${result.actuator.elapsedSeconds.toFixed(1)} / ${result.actuator.scheduleDurationSeconds} detik`
-                          : `Progres tahap: ${formatValue(result.actuator.stageLiters)} / ${formatValue(result.actuator.targetLiters)} L`}
-                    </label>
-                    <progress id="stage-progress" aria-label="Progres tahap aktuator" className="h-3 w-full accent-green-700" max={1} value={stageProgress} />
-                  </>
-                )}
-                <dl>
-                  <Detail label="Flow tahap ini" value={`${result.actuator.stagePulses} pulsa · ${formatValue(result.actuator.stageLiters)} L`} />
-                  <Detail label="Debit terakhir" value={`${formatValue(result.actuator.flowRateLitersPerMinute)} L/menit`} />
-                  <Detail label="Waktu tahap" value={`${formatValue(result.actuator.elapsedSeconds, 1)} detik`} />
-                  <Detail label="Tahap selesai" value={result.actuator.completedStages.length ? result.actuator.completedStages.map((stage) => stageLabels[stage]).join(' → ') : 'Belum ada'} />
-                  <Detail label="Alasan berhenti" value={result.actuator.stopReason ?? '—'} />
-                </dl>
-              </div>
-
-              <div className="space-y-4">
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <MetricCard label="Relay irigasi" value={relayOutputs?.irrigation ? 'ON' : 'OFF'} detail="Status virtual" />
-                  <MetricCard label="Relay fertigasi" value={relayOutputs?.fertilizer ? 'ON' : 'OFF'} detail="Status virtual" />
-                  <MetricCard label="Pompa" value={relayOutputs?.pump ? 'ON' : 'OFF'} detail="Status virtual" />
-                </div>
-                {!isInterStageDelay && (
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <NumberField id="flow-pulses" label="Pulsa flow tambahan" value={flowPulses} onChange={setFlowPulses} unit="pulsa" min={0} max={2_000_000} />
-                    <NumberField id="flow-seconds" label="Lama pulsa" value={flowSeconds} onChange={setFlowSeconds} unit="detik" min={0.01} max={1_800} step={0.1} />
-                  </div>
-                )}
-                <button
-                  type="button"
-                  onClick={advanceFlow}
-                  disabled={result.actuator.stage === 'IDLE'}
-                  className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-blue-300 bg-blue-50 px-4 py-2.5 font-semibold text-blue-800 transition-colors hover:bg-blue-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-200 dark:hover:bg-blue-500/20"
-                >
-                  <Gauge size={17} aria-hidden="true" />
-                  {isInterStageDelay ? 'Jalankan jeda virtual 3 detik' : 'Tambahkan flow virtual'}
-                </button>
-              </div>
-            </div>
-          </SectionCard>
 
         </section>
       )}

@@ -169,8 +169,10 @@ export interface MqttIrrigationFlowTestSnapshot {
 
 export interface MqttSimulationSnapshot {
   requestId: string;
-  state: 'queued' | 'evaluated' | 'rejected';
+  state: 'queued' | 'evaluated' | 'rejected' | 'stopped';
   message: string;
+  executionState: 'preview' | 'started' | 'no_action' | 'blocked_schedule' | 'stopped' | null;
+  actuatorStarted: boolean | null;
   priority: string | null;
   decision: string | null;
   stage: string | null;
@@ -1161,7 +1163,7 @@ function updateFromTopic(topic: string, payload: string) {
     if (
       typeof requestId !== 'string' ||
       requestId.length === 0 ||
-      (state !== 'queued' && state !== 'evaluated' && state !== 'rejected') ||
+      (state !== 'queued' && state !== 'evaluated' && state !== 'rejected' && state !== 'stopped') ||
       typeof parsed?.message !== 'string'
     ) {
       console.warn('[MQTT] Status simulasi ESP32 tidak valid:', payload);
@@ -1176,6 +1178,14 @@ function updateFromTopic(topic: string, payload: string) {
       requestId,
       state,
       message: parsed.message,
+      executionState: parsed.execution_state === 'preview' ||
+        parsed.execution_state === 'started' ||
+        parsed.execution_state === 'no_action' ||
+        parsed.execution_state === 'blocked_schedule' ||
+        parsed.execution_state === 'stopped'
+        ? parsed.execution_state
+        : null,
+      actuatorStarted: readBoolean('actuator_started'),
       priority: typeof parsed.priority === 'string' ? parsed.priority : null,
       decision: typeof parsed.decision === 'string' ? parsed.decision : null,
       stage: typeof parsed.stage === 'string' ? parsed.stage : null,
@@ -1812,6 +1822,7 @@ export function createSimulationRequestId() {
 export async function evaluateSimulationOnEsp32(
   requestId: string,
   input: IrrigationSimulationInput,
+  action: 'EVALUATE' | 'EXECUTE' = 'EVALUATE',
 ): Promise<MqttSimulationSnapshot> {
   if (!requestId || requestId.length > 40) {
     throw new Error('ID simulasi tidak valid.');
@@ -1819,7 +1830,7 @@ export async function evaluateSimulationOnEsp32(
 
   await publishMqttWithAck(
     TOPIC_SIMULATION_COMMAND,
-    JSON.stringify({ action: 'EVALUATE', request_id: requestId, input }),
+    JSON.stringify({ action, request_id: requestId, input }),
     TOPIC_SIMULATION_STATUS,
     (_topic, message) => {
       const parsed = parseMqttJsonPayload(message);
@@ -1836,6 +1847,36 @@ export async function evaluateSimulationOnEsp32(
   }
   if (response.state !== 'evaluated') {
     throw new Error(response.message || 'ESP32 menolak evaluasi simulasi.');
+  }
+  return response;
+}
+
+export async function stopAutomaticSimulationOnEsp32(
+  requestId: string,
+): Promise<MqttSimulationSnapshot> {
+  if (!requestId || requestId.length > 40) {
+    throw new Error('ID perintah berhenti tidak valid.');
+  }
+
+  await publishMqttWithAck(
+    TOPIC_SIMULATION_COMMAND,
+    JSON.stringify({ action: 'STOP', request_id: requestId }),
+    TOPIC_SIMULATION_STATUS,
+    (_topic, message) => {
+      const parsed = parseMqttJsonPayload(message);
+      return parsed?.request_id === requestId &&
+        (parsed.state === 'stopped' || parsed.state === 'rejected');
+    },
+    15_000,
+    { retain: false, qos: 1 },
+  );
+
+  const response = snapshot.simulationSnapshot;
+  if (!response || response.requestId !== requestId) {
+    throw new Error('ESP32 tidak mengirim konfirmasi penghentian aktuator.');
+  }
+  if (response.state !== 'stopped') {
+    throw new Error(response.message || 'ESP32 menolak perintah penghentian aktuator.');
   }
   return response;
 }

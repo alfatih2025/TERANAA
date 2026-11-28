@@ -17,10 +17,13 @@ import {
 import { DEFAULT_SETTINGS, useSettings } from '../context/SettingsContext';
 import { useMqttStatus } from '../hooks/useMqttStatus';
 import {
+  createSimulationRequestId,
   createIrrigationFlowTestRequestId,
+  evaluateSimulationOnEsp32,
   startIrrigationFlowTest,
   stopIrrigationFlowTest,
 } from '../services/mqtt';
+import type { MqttSimulationSnapshot } from '../services/mqtt';
 import {
   advanceSimulationFlow,
   evaluateIrrigationScenario,
@@ -272,12 +275,22 @@ function formatValue(value: number | null | undefined, digits = 2) {
 
 export function SimulationPage() {
   const { settings: storedSettings, loading: settingsLoading } = useSettings();
-  const { actuatorSnapshot, espOnline, mqttConnected, sensorSnapshot, irrigationFlowTestSnapshot } = useMqttStatus();
+  const {
+    actuatorSnapshot,
+    espOnline,
+    mqttConnected,
+    sensorSnapshot,
+    irrigationFlowTestSnapshot,
+    simulationSnapshot,
+  } = useMqttStatus();
   const settings = storedSettings ?? DEFAULT_SETTINGS;
   const [form, setForm] = useState<SimulationForm>(makeInitialForm);
   const [phaseChoice, setPhaseChoice] = useState<'settings' | SimulationPhase>('settings');
   const [result, setResult] = useState<IrrigationSimulationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [simulationRequestId, setSimulationRequestId] = useState<string | null>(null);
+  const [firmwareSimulationPending, setFirmwareSimulationPending] = useState(false);
+  const [firmwareSimulationError, setFirmwareSimulationError] = useState<string | null>(null);
   const [flowPulses, setFlowPulses] = useState('450');
   const [flowSeconds, setFlowSeconds] = useState('10');
   const [hardwareTestConfirmed, setHardwareTestConfirmed] = useState(false);
@@ -292,6 +305,8 @@ export function SimulationPage() {
     setForm((current) => ({ ...current, [key]: value }));
     setResult(null);
     setError(null);
+    setSimulationRequestId(null);
+    setFirmwareSimulationError(null);
   };
 
   const makeInput = (): IrrigationSimulationInput => {
@@ -360,13 +375,27 @@ export function SimulationPage() {
     };
   };
 
-  const runSimulation = () => {
+  const runSimulation = async () => {
     setError(null);
+    setFirmwareSimulationError(null);
+    let requestStarted = false;
     try {
-      setResult(evaluateIrrigationScenario(makeInput()));
+      const input = makeInput();
+      setResult(evaluateIrrigationScenario(input));
+      const requestId = createSimulationRequestId();
+      setSimulationRequestId(requestId);
+      setFirmwareSimulationPending(true);
+      requestStarted = true;
+      await evaluateSimulationOnEsp32(requestId, input);
     } catch (cause) {
-      setResult(null);
-      setError(cause instanceof Error ? cause.message : 'Input simulasi tidak valid.');
+      if (!requestStarted) {
+        setResult(null);
+        setError(cause instanceof Error ? cause.message : 'Input simulasi tidak valid.');
+      } else {
+        setFirmwareSimulationError(cause instanceof Error ? cause.message : 'ESP32 tidak dapat mengevaluasi simulasi.');
+      }
+    } finally {
+      setFirmwareSimulationPending(false);
     }
   };
 
@@ -375,6 +404,8 @@ export function SimulationPage() {
     setPhaseChoice('settings');
     setResult(null);
     setError(null);
+    setSimulationRequestId(null);
+    setFirmwareSimulationError(null);
     setFlowPulses('450');
     setFlowSeconds('10');
   };
@@ -430,11 +461,21 @@ export function SimulationPage() {
     : null;
   const hardwareTestRunning = hardwareTestSnapshot?.state === 'started' &&
     actuatorSnapshot?.pompa !== false;
-  const physicalWaterStage = result !== null &&
-    ['IRIGASI', 'PRE_WET', 'POST_FLUSH'].includes(result.actuator.stage) &&
-    relayOutputs?.irrigation === true;
-  const hardwareTargetLiters = physicalWaterStage && result
-    ? Math.min(0.5, Math.max(0.2, result.actuator.targetLiters))
+  const firmwareSimulationResult: MqttSimulationSnapshot | null =
+    simulationRequestId !== null &&
+    simulationSnapshot?.requestId === simulationRequestId &&
+    simulationSnapshot.state === 'evaluated'
+      ? simulationSnapshot
+      : null;
+  const firmwareSimulationStatus = simulationRequestId !== null &&
+    simulationSnapshot?.requestId === simulationRequestId
+    ? simulationSnapshot
+    : null;
+  const physicalWaterStage = firmwareSimulationResult !== null &&
+    ['IRIGASI', 'PRE_WET'].includes(firmwareSimulationResult.stage ?? '') &&
+    firmwareSimulationResult.pumpPredicted === true;
+  const hardwareTargetLiters = physicalWaterStage && firmwareSimulationResult
+    ? Math.min(0.5, Math.max(0.2, firmwareSimulationResult.targetLiters ?? 0))
     : 0;
   const hardwareTargetValid = hardwareTargetLiters >= 0.2 && hardwareTargetLiters <= 0.5;
   const hardwareActuatorsIdle = actuatorSnapshot?.irigasi === false &&
@@ -515,22 +556,23 @@ export function SimulationPage() {
           <div>
             <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Simulasi Kontrol</h1>
             <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-              Simulasikan input sensor, semua perhitungan kontrol, dan keluaran aktuator virtual.
+                Kirim input dummy ke ESP32 untuk mengevaluasi logika kontrol tanpa mengubah telemetri sensor asli atau relay fisik.
             </p>
           </div>
         </div>
         <span className="inline-flex min-h-10 items-center gap-2 self-start rounded-full bg-green-100 px-3 py-2 text-sm font-semibold text-green-800 dark:bg-green-500/15 dark:text-green-200">
           <ShieldCheck size={16} aria-hidden="true" />
-          Simulasi lokal · uji hardware terpisah
+          Dry-run ESP32 · relay fisik tetap aman
         </span>
       </header>
 
       <div className="flex items-start gap-3 rounded-2xl border border-green-300 bg-green-50 p-4 text-sm leading-6 text-green-950 dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-100">
         <CheckCircle2 className="mt-0.5 shrink-0" size={19} aria-hidden="true" />
         <p>
-            Perhitungan dan pulsa simulasi tetap lokal. Data Node 1–3 yang sebenarnya tetap dikirim seperti biasa;
-            nilai simulasi tidak menggantikan atau mengirim data sensor palsu. Setelah hasil menunjukkan tahap air bersih
-            aktif, Anda dapat memilih uji fisik terpisah yang dibatasi flowmeter ESP32.
+            Input dummy dikirim melalui topik simulasi khusus dan dihitung oleh logika firmware ESP32.
+            Input ini tidak dipublikasikan sebagai telemetri Node 1–3 dan hanya menghasilkan pratinjau aktuator;
+            relay fisik tidak berubah. Data sensor nyata tetap berjalan terpisah. Uji pompa air bersih tetap memerlukan
+            konfirmasi khusus serta dibatasi flowmeter nyata.
         </p>
       </div>
 
@@ -538,6 +580,12 @@ export function SimulationPage() {
         <div className="flex items-start gap-2 rounded-2xl border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200" role="alert" aria-live="assertive">
           <AlertTriangle className="mt-0.5 shrink-0" size={17} aria-hidden="true" />
           <span>{error}</span>
+        </div>
+      )}
+      {firmwareSimulationError && (
+        <div className="flex items-start gap-2 rounded-2xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100" role="alert" aria-live="assertive">
+          <AlertTriangle className="mt-0.5 shrink-0" size={17} aria-hidden="true" />
+          <span>Hasil lokal tersedia, tetapi evaluasi firmware ESP32 gagal: {firmwareSimulationError}</span>
         </div>
       )}
 
@@ -685,10 +733,11 @@ export function SimulationPage() {
         <button
           type="button"
           onClick={runSimulation}
-          className="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-green-700 px-5 py-3 font-bold text-white transition-colors hover:bg-green-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-700"
+          disabled={firmwareSimulationPending}
+          className="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-green-700 px-5 py-3 font-bold text-white transition-colors hover:bg-green-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Play size={18} aria-hidden="true" />
-          Hitung simulasi lokal
+          {firmwareSimulationPending ? 'Menunggu hasil ESP32…' : 'Hitung & kirim input ke ESP32'}
         </button>
         <button
           type="button"
@@ -737,16 +786,18 @@ export function SimulationPage() {
 
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-800">
             <p className="font-semibold text-slate-900 dark:text-slate-100">
-              {result === null
-                ? 'Hitung simulasi untuk memeriksa apakah hasil meminta tahap air bersih.'
-                : physicalWaterStage
-                  ? `Hasil simulasi: ${stageLabels[result.actuator.stage]} · target dihitung ${formatValue(result.actuator.targetLiters)} L. Uji fisik memakai ${formatValue(hardwareTargetLiters)} L (batas aman 0,2–0,5 L).`
-                  : `Hasil simulasi: ${stageLabels[result.actuator.stage]} · tahap ini tidak dapat dijalankan sebagai uji air bersih.`}
+              {!firmwareSimulationResult
+                  ? firmwareSimulationPending
+                    ? 'Menunggu evaluasi logika dari ESP32…'
+                    : 'Kirim input simulasi ke ESP32 untuk mengetahui apakah hasilnya meminta tahap air bersih.'
+                  : physicalWaterStage
+                    ? `Hasil ESP32: ${firmwareSimulationResult.stage} · target ${formatValue(firmwareSimulationResult.targetLiters)} L. Uji fisik memakai ${formatValue(hardwareTargetLiters)} L (batas aman 0,2–0,5 L).`
+                    : `Hasil ESP32: ${firmwareSimulationResult.stage ?? 'IDLE'} · tahap ini tidak dapat dijalankan sebagai uji air bersih.`}
             </p>
             <p className="mt-1 text-slate-600 dark:text-slate-300">
-              Syarat mulai: hasil simulasi meminta irigasi/air bersih aktif, gateway online, mode perangkat MANUAL,
+              Syarat mulai: hasil ESP32 meminta IRIGASI atau PRE-WET aktif, gateway online, mode perangkat MANUAL,
               semua relay OFF, flow nyata di bawah 0,05 L/menit, dan konfirmasi jalur air aman.
-              Mode otomatis di form hanya memengaruhi perhitungan simulasi; mode Gateway ditampilkan terpisah di atas.
+              Input otomatis di form hanya memengaruhi evaluasi dry-run; mode Gateway ditampilkan terpisah di atas.
             </p>
           </div>
 
@@ -810,15 +861,77 @@ export function SimulationPage() {
           <div className="flex flex-col gap-3 rounded-3xl border border-green-300 bg-green-50 p-5 dark:border-green-500/30 dark:bg-green-500/10 sm:flex-row sm:items-start">
             <CheckCircle2 className="mt-0.5 shrink-0 text-green-700 dark:text-green-300" size={22} aria-hidden="true" />
             <div className="min-w-0 flex-1">
-              <h2 id="simulation-results" className="text-lg font-bold text-green-950 dark:text-green-100">{result.priority}</h2>
+              <h2 id="simulation-results" className="text-lg font-bold text-green-950 dark:text-green-100">Pembanding lokal: {result.priority}</h2>
               <p className="mt-1 text-sm leading-6 text-green-900 dark:text-green-100">{result.action}</p>
             </div>
             <button type="button" onClick={resetStage} className="min-h-10 shrink-0 rounded-xl border border-green-700/30 px-3 text-sm font-semibold text-green-900 hover:bg-green-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-700 dark:text-green-100 dark:hover:bg-green-500/20">
-              Ulangi tahap
+            Ulangi simulasi lokal
             </button>
           </div>
 
-          <SectionCard title="Data input sensor yang dihitung" description="Nilai lokal yang dipakai untuk menghasilkan ringkasan agregasi, skor, FDRS, guard, dan target aktuator di bawah. Telemetri node fisik tetap berjalan terpisah." icon={<Thermometer size={19} />}>
+          <SectionCard
+            title="Hasil evaluasi firmware ESP32"
+            description="Hasil ini berasal dari evaluator firmware produksi dengan input dummy sementara. Tidak ada relay fisik yang diaktifkan."
+            icon={<Gauge size={19} />}
+          >
+            {!firmwareSimulationStatus || firmwareSimulationStatus.state === 'queued' ? (
+              <p className="rounded-xl border border-sky-300 bg-sky-50 p-3 text-sm text-sky-950 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-100" role="status" aria-live="polite">
+                {firmwareSimulationStatus?.message ?? 'Menunggu ESP32 menerima input simulasi.'}
+              </p>
+            ) : firmwareSimulationResult ? (
+              <div className="space-y-4">
+                <div className="rounded-xl border border-green-300 bg-green-50 p-3 text-sm dark:border-green-500/30 dark:bg-green-500/10">
+                  <p className="font-semibold text-green-950 dark:text-green-100">
+                    Prioritas: {firmwareSimulationResult.priority ?? '—'} · keputusan: {firmwareSimulationResult.decision ?? '—'}
+                  </p>
+                  <p className="mt-1 text-green-900 dark:text-green-100">
+                    Tahap {firmwareSimulationResult.stage ?? 'IDLE'} · irigasi {firmwareSimulationResult.irrigationPredicted ? 'aktif' : 'tidak aktif'} · siklus fertigasi {firmwareSimulationResult.fertilizerCyclePredicted ? 'direncanakan' : 'tidak aktif'} · pompa diprediksi {firmwareSimulationResult.pumpPredicted ? 'ON' : 'OFF'} · relay fisik tidak berubah.
+                  </p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <MetricCard label="Soil representatif / minimum" value={`${formatValue(firmwareSimulationResult.soilRepresentative)}% / ${formatValue(firmwareSimulationResult.soilMinimum)}%`} detail="Agregasi aktual firmware dari input Node 1–2." />
+                  <MetricCard label="Suhu / RH rata-rata" value={`${formatValue(firmwareSimulationResult.averageTemperature)}°C / ${formatValue(firmwareSimulationResult.averageHumidity)}%`} detail={`VPD ${formatValue(firmwareSimulationResult.vpd, 3)} kPa`} />
+                  <MetricCard label="Skor irigasi ESP32" value={`${formatValue(firmwareSimulationResult.totalScore)} / 100`} detail={`Tanah ${formatValue(firmwareSimulationResult.soilScore)} + VPD ${formatValue(firmwareSimulationResult.vpdScore)} + interaksi ${formatValue(firmwareSimulationResult.interactionScore)} − hujan ${formatValue(firmwareSimulationResult.rainScore)}.`} />
+                  <MetricCard label="Target tahap air" value={`${formatValue(firmwareSimulationResult.targetLiters)} L`} detail={`Dosis ${formatValue(firmwareSimulationResult.fertilizerLiters)} L · bilas ${formatValue(firmwareSimulationResult.postFlushLiters)} L`} />
+                </div>
+                <div className="grid gap-5 md:grid-cols-2">
+                  <dl>
+                    <Detail label="Defisit tanah" value={`${formatValue(firmwareSimulationResult.waterSoilDeficit)}%`} />
+                    <Detail label="Faktor evaporasi dasar + koreksi suhu/RH" value={`${formatValue(firmwareSimulationResult.waterEvaporationBase, 3)} + ${formatValue(firmwareSimulationResult.waterTemperatureAdjustment, 2)} + ${formatValue(firmwareSimulationResult.waterHumidityAdjustment, 2)}`} />
+                    <Detail label="Faktor evaporasi terpakai" value={formatValue(firmwareSimulationResult.waterEvaporationFactor, 3)} />
+                    <Detail label="Faktor fase / skor" value={`${formatValue(firmwareSimulationResult.waterPhaseFactor, 2)} / ${formatValue(firmwareSimulationResult.waterScoreFactor, 2)}`} />
+                    <Detail label="Volume air mentah → target hitung" value={`${formatValue(firmwareSimulationResult.waterRawLiters)} → ${formatValue(firmwareSimulationResult.waterCalculatedLiters)} L`} />
+                  </dl>
+                  <dl>
+                    <Detail label="Dosis dasar → dosis fase → final" value={`${formatValue(firmwareSimulationResult.fertilizerBaseDoseLiters)} → ${formatValue(firmwareSimulationResult.fertilizerPhaseDoseLiters)} → ${formatValue(firmwareSimulationResult.fertilizerFinalDoseLiters)} L`} />
+                    <Detail label="Fertigasi gambut masam" value={firmwareSimulationResult.peatAcid ? 'Aktif' : 'Tidak aktif'} />
+                    <Detail label="Target tahap / POST-FLUSH" value={`${formatValue(firmwareSimulationResult.targetLiters)} / ${formatValue(firmwareSimulationResult.postFlushLiters)} L`} />
+                    <Detail label="Durasi jadwal" value={`${formatValue(firmwareSimulationResult.scheduleDurationSeconds, 0)} detik`} />
+                  </dl>
+                </div>
+                <div className="grid gap-5 md:grid-cols-2">
+                  <dl>
+                    <Detail label="FDRS · FFMC / DMC / DC" value={`${formatValue(firmwareSimulationResult.ffmc)} / ${formatValue(firmwareSimulationResult.dmc)} / ${formatValue(firmwareSimulationResult.dc)}`} />
+                    <Detail label="FDRS · ISI / BUI / FWI" value={`${formatValue(firmwareSimulationResult.isi)} / ${formatValue(firmwareSimulationResult.bui)} / ${formatValue(firmwareSimulationResult.fwi)}`} />
+                    <Detail label="Level FWI / kondisi pemicu" value={`${formatValue(firmwareSimulationResult.fwiLevel, 0)} / ${firmwareSimulationResult.fireActive ? 'aktif' : 'tidak aktif'}`} />
+                    <Detail label="Histeresis skor aktif" value={firmwareSimulationResult.cycleActive == null ? '—' : firmwareSimulationResult.cycleActive ? 'Aktif' : 'Tidak aktif'} />
+                  </dl>
+                  <dl>
+                    <Detail label="Guard hujan / tanah basah" value={`${firmwareSimulationResult.guardRain ? 'BLOKIR' : 'Lolos'} / ${firmwareSimulationResult.guardWetSoil ? 'BLOKIR' : 'Lolos'}`} />
+                    <Detail label="Guard jam terik / pH" value={`${firmwareSimulationResult.guardHotHour ? 'BLOKIR' : 'Lolos'} / ${firmwareSimulationResult.guardDangerousPh ? 'BLOKIR' : 'Lolos'}`} />
+                    <Detail label="Interval / jendela biologis" value={`${firmwareSimulationResult.fertilizerIntervalDue ? 'Tercapai' : 'Belum'} / ${firmwareSimulationResult.fertilizerBiologicalWindow ? 'Terbuka' : 'Tertutup'}`} />
+                    <Detail label="Hasil guard fertigasi" value={firmwareSimulationResult.fertilizerAllowed ? 'Diizinkan' : firmwareSimulationResult.fertilizerBlockReason ?? 'Tidak diizinkan'} />
+                  </dl>
+                </div>
+              </div>
+            ) : (
+              <p className="rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-100" role="alert">
+                {firmwareSimulationStatus.message}
+              </p>
+            )}
+          </SectionCard>
+
+          <SectionCard title="Input sensor dummy" description="Nilai skenario yang dikirim ke ESP32 untuk dry-run dan juga dihitung lokal sebagai pembanding. Telemetri node fisik tetap berjalan terpisah." icon={<Thermometer size={19} />}>
             <div className="grid gap-5 md:grid-cols-2">
               <dl>
                 <Detail label="Node 1 · kelembapan tanah" value={`${form.soil1 || '—'}%`} />

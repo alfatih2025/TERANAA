@@ -1,4 +1,5 @@
 import type { MqttClient } from 'mqtt';
+import type { IrrigationSimulationInput } from '../lib/irrigationSimulation';
 
 const DEFAULT_BROKER_URL = 'wss://083ac0ac0dbf4e78877e4a5cd24d426d.s1.eu.hivemq.cloud:8884/mqtt';
 const DEFAULT_MQTT_USERNAME = 'TeraNova';
@@ -41,6 +42,8 @@ const TOPIC_FLOW_RESET_COMMAND = 'sproutai/flow/reset/cmd';
 const TOPIC_FLOW_RESET_STATUS = 'sproutai/flow/reset/status';
 const TOPIC_FLOW_TEST_COMMAND = 'sproutai/actuator/flow-test/cmd';
 const TOPIC_FLOW_TEST_STATUS = 'sproutai/actuator/flow-test/status';
+const TOPIC_SIMULATION_COMMAND = 'sproutai/simulation/cmd';
+const TOPIC_SIMULATION_STATUS = 'sproutai/simulation/status';
 const TOPIC_SYSTEM_FAULT = 'sproutai/system/fault';
 const TOPIC_KARHUTLA_FWI = 'sproutai/karhutla/fwi';
 const TOPIC_KARHUTLA_ALERT = 'sproutai/karhutla/alert';
@@ -56,6 +59,7 @@ const SUBSCRIBE_TOPICS = [
   TOPIC_SENSOR_NODE,
   TOPIC_FLOW_RESET_STATUS,
   TOPIC_FLOW_TEST_STATUS,
+  TOPIC_SIMULATION_STATUS,
   TOPIC_KARHUTLA_FWI,
   TOPIC_KARHUTLA_ALERT,
   TOPIC_PH,
@@ -163,6 +167,66 @@ export interface MqttIrrigationFlowTestSnapshot {
   updatedAt: string;
 }
 
+export interface MqttSimulationSnapshot {
+  requestId: string;
+  state: 'queued' | 'evaluated' | 'rejected';
+  message: string;
+  priority: string | null;
+  decision: string | null;
+  stage: string | null;
+  pumpPredicted: boolean | null;
+  irrigationPredicted: boolean | null;
+  fertilizerCyclePredicted: boolean | null;
+  relaysUnchanged: boolean | null;
+  soilRepresentative: number | null;
+  soilMinimum: number | null;
+  averageTemperature: number | null;
+  averageHumidity: number | null;
+  vpd: number | null;
+  soilScore: number | null;
+  vpdScore: number | null;
+  interactionScore: number | null;
+  rainScore: number | null;
+  totalScore: number | null;
+  waterSoilDeficit: number | null;
+  waterEvaporationBase: number | null;
+  waterTemperatureAdjustment: number | null;
+  waterHumidityAdjustment: number | null;
+  waterEvaporationFactor: number | null;
+  waterPhaseFactor: number | null;
+  waterScoreFactor: number | null;
+  waterRawLiters: number | null;
+  waterCalculatedLiters: number | null;
+  cycleActive: boolean | null;
+  rainChance: number | null;
+  ph: number | null;
+  fireActive: boolean | null;
+  ffmc: number | null;
+  dmc: number | null;
+  dc: number | null;
+  isi: number | null;
+  bui: number | null;
+  fwi: number | null;
+  fwiLevel: number | null;
+  guardRain: boolean | null;
+  guardWetSoil: boolean | null;
+  guardHotHour: boolean | null;
+  guardDangerousPh: boolean | null;
+  fertilizerIntervalDue: boolean | null;
+  fertilizerBiologicalWindow: boolean | null;
+  fertilizerAllowed: boolean | null;
+  peatAcid: boolean | null;
+  fertilizerBaseDoseLiters: number | null;
+  fertilizerPhaseDoseLiters: number | null;
+  fertilizerFinalDoseLiters: number | null;
+  fertilizerBlockReason: string | null;
+  targetLiters: number | null;
+  fertilizerLiters: number | null;
+  postFlushLiters: number | null;
+  scheduleDurationSeconds: number | null;
+  updatedAt: string;
+}
+
 export interface MqttScheduleSnapshot {
   schedule_enabled: boolean;
   watering_time: string;
@@ -187,6 +251,7 @@ export interface MqttStatusSnapshot {
   panicDumpSnapshot: MqttPanicDumpSnapshot | null;
   flowCounterResetSnapshot: MqttFlowCounterResetSnapshot | null;
   irrigationFlowTestSnapshot: MqttIrrigationFlowTestSnapshot | null;
+  simulationSnapshot: MqttSimulationSnapshot | null;
   systemOnline: boolean;
   systemLabel: string;
   systemDetail: string;
@@ -316,6 +381,7 @@ const defaultSnapshot = (): MqttStatusSnapshot => ({
   panicDumpSnapshot: null,
   flowCounterResetSnapshot: null,
   irrigationFlowTestSnapshot: null,
+  simulationSnapshot: null,
   systemOnline: false,
   systemLabel: 'Sistem Offline',
   systemDetail: 'Koneksi belum tersedia',
@@ -1088,6 +1154,94 @@ function updateFromTopic(topic: string, payload: string) {
     return;
   }
 
+  if (topic === TOPIC_SIMULATION_STATUS) {
+    const parsed = parseMqttJsonPayload(trimmed);
+    const requestId = parsed?.request_id;
+    const state = parsed?.state;
+    if (
+      typeof requestId !== 'string' ||
+      requestId.length === 0 ||
+      (state !== 'queued' && state !== 'evaluated' && state !== 'rejected') ||
+      typeof parsed?.message !== 'string'
+    ) {
+      console.warn('[MQTT] Status simulasi ESP32 tidak valid:', payload);
+      return;
+    }
+
+    const readBoolean = (key: string) => {
+      const value = parsed[key];
+      return typeof value === 'boolean' ? value : null;
+    };
+    const simulationSnapshot: MqttSimulationSnapshot = {
+      requestId,
+      state,
+      message: parsed.message,
+      priority: typeof parsed.priority === 'string' ? parsed.priority : null,
+      decision: typeof parsed.decision === 'string' ? parsed.decision : null,
+      stage: typeof parsed.stage === 'string' ? parsed.stage : null,
+      pumpPredicted: readBoolean('pump_predicted'),
+      irrigationPredicted: readBoolean('irrigation_predicted'),
+      fertilizerCyclePredicted: readBoolean('fertilizer_cycle_predicted'),
+      relaysUnchanged: readBoolean('relays_unchanged'),
+      soilRepresentative: parseNumeric(parsed.soil_rep),
+      soilMinimum: parseNumeric(parsed.soil_min),
+      averageTemperature: parseNumeric(parsed.avg_temperature),
+      averageHumidity: parseNumeric(parsed.avg_humidity),
+      vpd: parseNumeric(parsed.vpd),
+      soilScore: parseNumeric(parsed.soil_score),
+      vpdScore: parseNumeric(parsed.vpd_score),
+      interactionScore: parseNumeric(parsed.interaction_score),
+      rainScore: parseNumeric(parsed.rain_score),
+      totalScore: parseNumeric(parsed.total_score),
+      waterSoilDeficit: parseNumeric(parsed.water_soil_deficit),
+      waterEvaporationBase: parseNumeric(parsed.water_evaporation_base),
+      waterTemperatureAdjustment: parseNumeric(parsed.water_temperature_adjustment),
+      waterHumidityAdjustment: parseNumeric(parsed.water_humidity_adjustment),
+      waterEvaporationFactor: parseNumeric(parsed.water_evaporation_factor),
+      waterPhaseFactor: parseNumeric(parsed.water_phase_factor),
+      waterScoreFactor: parseNumeric(parsed.water_score_factor),
+      waterRawLiters: parseNumeric(parsed.water_raw_liters),
+      waterCalculatedLiters: parseNumeric(parsed.water_calculated_liters),
+      cycleActive: readBoolean('cycle_active'),
+      rainChance: parseNumeric(parsed.rain_chance),
+      ph: parseNumeric(parsed.ph),
+      fireActive: readBoolean('fire_active'),
+      ffmc: parseNumeric(parsed.ffmc),
+      dmc: parseNumeric(parsed.dmc),
+      dc: parseNumeric(parsed.dc),
+      isi: parseNumeric(parsed.isi),
+      bui: parseNumeric(parsed.bui),
+      fwi: parseNumeric(parsed.fwi),
+      fwiLevel: parseNumeric(parsed.fwi_level),
+      guardRain: readBoolean('guard_rain'),
+      guardWetSoil: readBoolean('guard_wet_soil'),
+      guardHotHour: readBoolean('guard_hot_hour'),
+      guardDangerousPh: readBoolean('guard_dangerous_ph'),
+      fertilizerIntervalDue: readBoolean('fertilizer_interval_due'),
+      fertilizerBiologicalWindow: readBoolean('fertilizer_biological_window'),
+      fertilizerAllowed: readBoolean('fertilizer_allowed'),
+      peatAcid: readBoolean('peat_acid'),
+      fertilizerBaseDoseLiters: parseNumeric(parsed.fertilizer_base_dose_liters),
+      fertilizerPhaseDoseLiters: parseNumeric(parsed.fertilizer_phase_dose_liters),
+      fertilizerFinalDoseLiters: parseNumeric(parsed.fertilizer_final_dose_liters),
+      fertilizerBlockReason: typeof parsed.fertilizer_block_reason === 'string'
+        ? parsed.fertilizer_block_reason
+        : null,
+      targetLiters: parseNumeric(parsed.target_liters),
+      fertilizerLiters: parseNumeric(parsed.fertilizer_liters),
+      postFlushLiters: parseNumeric(parsed.post_flush_liters),
+      scheduleDurationSeconds: parseNumeric(parsed.schedule_duration_seconds),
+      updatedAt: now,
+    };
+    setSnapshot({
+      simulationSnapshot,
+      lastTopic: topic,
+      lastPayload: payload,
+      lastMessageAt: now,
+    });
+    return;
+  }
+
   if (topic === DEVICE_STATUS_TOPIC) {
     const parsedStatus = parseStatusValue(trimmed);
     const isOnline = parsedStatus ?? true;
@@ -1647,6 +1801,41 @@ export async function stopIrrigationFlowTest(requestId: string): Promise<MqttIrr
   }
   if (response.state === 'rejected') {
     throw new Error(response.message || 'ESP32 menolak penghentian uji pompa.');
+  }
+  return response;
+}
+
+export function createSimulationRequestId() {
+  return `sim-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export async function evaluateSimulationOnEsp32(
+  requestId: string,
+  input: IrrigationSimulationInput,
+): Promise<MqttSimulationSnapshot> {
+  if (!requestId || requestId.length > 40) {
+    throw new Error('ID simulasi tidak valid.');
+  }
+
+  await publishMqttWithAck(
+    TOPIC_SIMULATION_COMMAND,
+    JSON.stringify({ action: 'EVALUATE', request_id: requestId, input }),
+    TOPIC_SIMULATION_STATUS,
+    (_topic, message) => {
+      const parsed = parseMqttJsonPayload(message);
+      return parsed?.request_id === requestId &&
+        (parsed.state === 'evaluated' || parsed.state === 'rejected');
+    },
+    20_000,
+    { retain: false, qos: 1 },
+  );
+
+  const response = snapshot.simulationSnapshot;
+  if (!response || response.requestId !== requestId) {
+    throw new Error('ESP32 tidak mengirim hasil evaluasi simulasi.');
+  }
+  if (response.state !== 'evaluated') {
+    throw new Error(response.message || 'ESP32 menolak evaluasi simulasi.');
   }
   return response;
 }

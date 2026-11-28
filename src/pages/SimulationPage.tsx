@@ -21,7 +21,7 @@ import {
   evaluateSimulationOnEsp32,
   stopAutomaticSimulationOnEsp32,
 } from '../services/mqtt';
-import type { MqttSimulationSnapshot } from '../services/mqtt';
+import type { MqttSimulationProgressSnapshot, MqttSimulationSnapshot } from '../services/mqtt';
 import {
   evaluateIrrigationScenario,
   type IrrigationSimulationInput,
@@ -257,6 +257,16 @@ function formatValue(value: number | null | undefined, digits = 2) {
   return value == null ? '—' : value.toFixed(digits);
 }
 
+function progressStateLabel(state: MqttSimulationProgressSnapshot['state']) {
+  switch (state) {
+    case 'running': return 'BERJALAN';
+    case 'stage_completed': return 'TAHAP TERCAPAI';
+    case 'completed': return 'SESI SELESAI';
+    case 'stopped': return 'DIHENTIKAN';
+    case 'failed': return 'BERHENTI · PERIKSA';
+  }
+}
+
 export function SimulationPage() {
   const { settings: storedSettings, loading: settingsLoading } = useSettings();
   const {
@@ -264,6 +274,7 @@ export function SimulationPage() {
     espOnline,
     mqttConnected,
     sensorSnapshot,
+    simulationProgressHistory,
     simulationSnapshot,
   } = useMqttStatus();
   const settings = storedSettings ?? DEFAULT_SETTINGS;
@@ -449,6 +460,12 @@ export function SimulationPage() {
     simulationSnapshot?.requestId === physicalExecutionRequestId
     ? simulationSnapshot
     : physicalExecutionResult;
+  const physicalProgressHistory = physicalExecutionRequestId === null
+    ? []
+    : simulationProgressHistory.filter((progress) => progress.requestId === physicalExecutionRequestId);
+  const latestPhysicalProgress = physicalProgressHistory.length > 0
+    ? physicalProgressHistory[physicalProgressHistory.length - 1]
+    : null;
   const executePhysicalSimulation = async () => {
     if (!canExecutePhysicalSimulation || !previewInput) return;
     setFirmwareSimulationError(null);
@@ -486,7 +503,6 @@ export function SimulationPage() {
     setPhysicalStopPending(true);
     try {
       const response = await stopAutomaticSimulationOnEsp32(createSimulationRequestId());
-      setPhysicalExecutionRequestId(response.requestId);
       setPhysicalExecutionResult(response);
     } catch (cause) {
       setPhysicalStopError(cause instanceof Error ? cause.message : 'Perintah berhenti tidak dapat dikirim.');
@@ -746,6 +762,63 @@ export function SimulationPage() {
               <Detail label="Flowmeter aktual" value={realFlowRate === null ? 'Belum ada pembacaan' : `${formatValue(realFlowRate)} L/menit`} />
             </dl>
           </div>
+
+          {physicalExecutionRequestId && (
+            <section className="space-y-3 rounded-xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-500/30 dark:bg-blue-500/10" aria-label="Pratinjau aliran aktual">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="font-semibold text-blue-950 dark:text-blue-100">Pratinjau aliran dan progres tahap aktual</h3>
+                <span role="status" aria-live="polite" className="rounded-full bg-white px-3 py-1 text-xs font-bold text-blue-900 dark:bg-slate-900 dark:text-blue-100">
+                  {latestPhysicalProgress ? progressStateLabel(latestPhysicalProgress.state) : 'MENUNGGU DATA FLOW'}
+                </span>
+              </div>
+              {latestPhysicalProgress ? (
+                <>
+                  <p className="text-sm leading-6 text-blue-950 dark:text-blue-100">
+                    {latestPhysicalProgress.message}
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <MetricCard label="Tahap berjalan" value={latestPhysicalProgress.stage.replace(/_/g, ' ')} detail="Status tahap dari FSM ESP32." />
+                    <MetricCard label="Debit aktual" value={`${formatValue(latestPhysicalProgress.flowRate)} L/menit`} detail="Pembacaan flowmeter nyata terbaru." />
+                    <MetricCard label="Volume tahap" value={`${formatValue(latestPhysicalProgress.currentLiters)} / ${formatValue(latestPhysicalProgress.targetLiters)} L`} detail="Volume aktual dibanding target tahap ini." />
+                    <MetricCard label="Pompa aktual" value={latestPhysicalProgress.pump ? 'ON' : 'OFF'} detail={`Irigasi ${latestPhysicalProgress.irrigation ? 'ON' : 'OFF'} · fertigasi ${latestPhysicalProgress.fertilizer ? 'ON' : 'OFF'}`} />
+                  </div>
+                  <div className="overflow-x-auto rounded-lg border border-blue-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+                    <table className="w-full min-w-[640px] text-left text-sm">
+                      <thead className="bg-blue-100 text-xs uppercase text-blue-950 dark:bg-slate-800 dark:text-slate-200">
+                        <tr>
+                          <th scope="col" className="px-3 py-2">Waktu</th>
+                          <th scope="col" className="px-3 py-2">Tahap / status</th>
+                          <th scope="col" className="px-3 py-2">Debit aktual</th>
+                          <th scope="col" className="px-3 py-2">Air masuk / target</th>
+                          <th scope="col" className="px-3 py-2">Pompa</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {[...physicalProgressHistory].reverse().map((progress, index) => (
+                          <tr key={`${progress.updatedAt}-${index}`} className="text-slate-800 dark:text-slate-100">
+                            <td className="whitespace-nowrap px-3 py-2 tabular-nums">{new Date(progress.updatedAt).toLocaleTimeString()}</td>
+                            <td className="whitespace-nowrap px-3 py-2">{progress.stage.replace(/_/g, ' ')} · {progressStateLabel(progress.state)}</td>
+                            <td className="whitespace-nowrap px-3 py-2 tabular-nums">{formatValue(progress.flowRate)} L/menit</td>
+                            <td className="whitespace-nowrap px-3 py-2 tabular-nums">{formatValue(progress.currentLiters)} / {formatValue(progress.targetLiters)} L</td>
+                            <td className="whitespace-nowrap px-3 py-2">{progress.pump ? 'ON' : 'OFF'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-xs leading-5 text-blue-900 dark:text-blue-100">
+                    Catatan progres berasal dari flowmeter dan status pompa fisik. Ketika target tahap tercapai, relay/pompa berhenti dan tahap berikutnya tercatat; setelah siklus berakhir, status berubah menjadi SESI SELESAI.
+                  </p>
+                </>
+              ) : firmwareExecutionStatus && firmwareExecutionStatus.executionState !== 'started' ? (
+                <p className="text-sm text-blue-950 dark:text-blue-100" role="status">
+                  {firmwareExecutionStatus.message}
+                </p>
+              ) : (
+                <p className="text-sm text-blue-950 dark:text-blue-100" role="status">Menunggu pembacaan progres tahap dan flowmeter dari ESP32.</p>
+              )}
+            </section>
+          )}
 
           <CheckField
             checked={physicalExecutionConfirmed}

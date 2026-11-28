@@ -44,6 +44,7 @@ const TOPIC_FLOW_TEST_COMMAND = 'sproutai/actuator/flow-test/cmd';
 const TOPIC_FLOW_TEST_STATUS = 'sproutai/actuator/flow-test/status';
 const TOPIC_SIMULATION_COMMAND = 'sproutai/simulation/cmd';
 const TOPIC_SIMULATION_STATUS = 'sproutai/simulation/status';
+const TOPIC_SIMULATION_PROGRESS = 'sproutai/simulation/progress';
 const TOPIC_SYSTEM_FAULT = 'sproutai/system/fault';
 const TOPIC_KARHUTLA_FWI = 'sproutai/karhutla/fwi';
 const TOPIC_KARHUTLA_ALERT = 'sproutai/karhutla/alert';
@@ -60,6 +61,7 @@ const SUBSCRIBE_TOPICS = [
   TOPIC_FLOW_RESET_STATUS,
   TOPIC_FLOW_TEST_STATUS,
   TOPIC_SIMULATION_STATUS,
+  TOPIC_SIMULATION_PROGRESS,
   TOPIC_KARHUTLA_FWI,
   TOPIC_KARHUTLA_ALERT,
   TOPIC_PH,
@@ -229,6 +231,20 @@ export interface MqttSimulationSnapshot {
   updatedAt: string;
 }
 
+export interface MqttSimulationProgressSnapshot {
+  requestId: string;
+  state: 'running' | 'stage_completed' | 'completed' | 'stopped' | 'failed';
+  message: string;
+  stage: string;
+  targetLiters: number;
+  currentLiters: number;
+  flowRate: number;
+  pump: boolean;
+  irrigation: boolean;
+  fertilizer: boolean;
+  updatedAt: string;
+}
+
 export interface MqttScheduleSnapshot {
   schedule_enabled: boolean;
   watering_time: string;
@@ -254,6 +270,8 @@ export interface MqttStatusSnapshot {
   flowCounterResetSnapshot: MqttFlowCounterResetSnapshot | null;
   irrigationFlowTestSnapshot: MqttIrrigationFlowTestSnapshot | null;
   simulationSnapshot: MqttSimulationSnapshot | null;
+  simulationProgressSnapshot: MqttSimulationProgressSnapshot | null;
+  simulationProgressHistory: MqttSimulationProgressSnapshot[];
   systemOnline: boolean;
   systemLabel: string;
   systemDetail: string;
@@ -384,6 +402,8 @@ const defaultSnapshot = (): MqttStatusSnapshot => ({
   flowCounterResetSnapshot: null,
   irrigationFlowTestSnapshot: null,
   simulationSnapshot: null,
+  simulationProgressSnapshot: null,
+  simulationProgressHistory: [],
   systemOnline: false,
   systemLabel: 'Sistem Offline',
   systemDetail: 'Koneksi belum tersedia',
@@ -1245,6 +1265,56 @@ function updateFromTopic(topic: string, payload: string) {
     };
     setSnapshot({
       simulationSnapshot,
+      lastTopic: topic,
+      lastPayload: payload,
+      lastMessageAt: now,
+    });
+    return;
+  }
+
+  if (topic === TOPIC_SIMULATION_PROGRESS) {
+    const parsed = parseMqttJsonPayload(trimmed);
+    const requestId = parsed?.request_id;
+    const state = parsed?.state;
+    const targetLiters = parsed ? parseNumeric(parsed.target_liters) : null;
+    const currentLiters = parsed ? parseNumeric(parsed.current_liters) : null;
+    const flowRate = parsed ? parseNumeric(parsed.flow_rate) : null;
+    const pump = parseBoolean(parsed?.pompa);
+    const irrigation = parseBoolean(parsed?.irigasi);
+    const fertilizer = parseBoolean(parsed?.fertigasi);
+    if (
+      typeof requestId !== 'string' ||
+      requestId.length === 0 ||
+      (state !== 'running' && state !== 'stage_completed' && state !== 'completed' && state !== 'stopped' && state !== 'failed') ||
+      typeof parsed?.message !== 'string' ||
+      typeof parsed.stage !== 'string' ||
+      targetLiters === null ||
+      currentLiters === null ||
+      flowRate === null ||
+      pump === undefined ||
+      irrigation === undefined ||
+      fertilizer === undefined
+    ) {
+      console.warn('[MQTT] Progres simulasi ESP32 tidak valid:', payload);
+      return;
+    }
+
+    const progress: MqttSimulationProgressSnapshot = {
+      requestId,
+      state,
+      message: parsed.message,
+      stage: parsed.stage,
+      targetLiters,
+      currentLiters,
+      flowRate,
+      pump,
+      irrigation,
+      fertilizer,
+      updatedAt: now,
+    };
+    setSnapshot({
+      simulationProgressSnapshot: progress,
+      simulationProgressHistory: [...snapshot.simulationProgressHistory, progress].slice(-300),
       lastTopic: topic,
       lastPayload: payload,
       lastMessageAt: now,
